@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, Alert } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, Alert, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useGastos, GastoRow } from "../../hooks/useGastos";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
@@ -22,6 +23,8 @@ export default function GastosScreen() {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [item, setItem] = useState("");
   const [valor, setValor] = useState("");
+  const [fecha, setFecha] = useState(new Date());
+  const [mostrarFecha, setMostrarFecha] = useState(false);
   const [rubro, setRubro] = useState(RUBROS[0]);
   const [esCompartido, setEsCompartido] = useState(true);
   const [nota, setNota] = useState("");
@@ -35,7 +38,7 @@ export default function GastosScreen() {
     setGuardando(true);
     try {
       await agregarGasto({
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: fecha.toISOString().slice(0, 10),
         item: item.trim(),
         valor: parseFloat(valor.replace(/[^0-9.]/g, "")),
         rubro,
@@ -45,6 +48,7 @@ export default function GastosScreen() {
       setItem("");
       setValor("");
       setNota("");
+      setFecha(new Date());
       setMostrarForm(false);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo guardar el gasto.");
@@ -70,6 +74,23 @@ export default function GastosScreen() {
         <Card style={styles.formCard}>
           <TextInput style={styles.input} placeholder="¿Qué fue el gasto?" placeholderTextColor={colors.textMuted} value={item} onChangeText={setItem} />
           <TextInput style={styles.input} placeholder="Valor (ej. 45000)" placeholderTextColor={colors.textMuted} value={valor} onChangeText={setValor} keyboardType="numeric" />
+
+          <TouchableOpacity style={styles.fechaBoton} onPress={() => setMostrarFecha(true)}>
+            <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+            <Text style={styles.fechaTexto}>{fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" })}</Text>
+          </TouchableOpacity>
+          {mostrarFecha && (
+            <DateTimePicker
+              value={fecha}
+              mode="date"
+              display={Platform.OS === "ios" ? "spinner" : "default"}
+              maximumDate={new Date()}
+              onChange={(_event, seleccionada) => {
+                setMostrarFecha(Platform.OS === "ios");
+                if (seleccionada) setFecha(seleccionada);
+              }}
+            />
+          )}
 
           <Text style={styles.label}>Rubro</Text>
           <View style={styles.chipsRow}>
@@ -128,6 +149,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   formCard: { marginHorizontal: spacing.lg },
   input: { backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm, fontSize: 15, color: colors.textPrimary },
+  fechaBoton: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm },
+  fechaTexto: { fontSize: 14, color: colors.textPrimary, fontWeight: "600" },
   label: { ...typography.caption, marginBottom: spacing.sm },
   chipsRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: spacing.sm },
   chip: { flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 6, marginRight: 6, marginBottom: 6 },

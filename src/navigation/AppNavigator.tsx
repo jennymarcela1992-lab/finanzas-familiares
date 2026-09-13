@@ -18,6 +18,7 @@ import EventosScreen from "../screens/Eventos/EventosScreen";
 import { useAuth } from "../hooks/useAuth";
 import { colors, spacing } from "../theme/theme";
 import SideMenu, { EntradaMenu } from "../components/SideMenu";
+import RealtimeBanner from "../components/RealtimeBanner";
 
 const Stack = createNativeStackNavigator();
 
@@ -119,6 +120,8 @@ function HomeShell() {
         }}
         onClose={() => setMenuOpen(false)}
       />
+
+      <RealtimeBanner />
     </View>
   );
 }
