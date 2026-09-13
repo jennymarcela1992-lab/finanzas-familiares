@@ -1,8 +1,8 @@
-import React from "react";
-import { View, ActivityIndicator } from "react-native";
+import React, { useState } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import LoginScreen from "../screens/Auth/LoginScreen";
 import DashboardScreen from "../screens/Dashboard/DashboardScreen";
@@ -16,47 +16,110 @@ import VehiculoScreen from "../screens/Vehiculo/VehiculoScreen";
 import InversionesScreen from "../screens/Inversiones/InversionesScreen";
 import EventosScreen from "../screens/Eventos/EventosScreen";
 import { useAuth } from "../hooks/useAuth";
-import { colors } from "../theme/theme";
+import { colors, spacing } from "../theme/theme";
+import SideMenu, { EntradaMenu } from "../components/SideMenu";
 
 const Stack = createNativeStackNavigator();
-const Tab = createBottomTabNavigator();
 
-const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  Dashboard: "home",
-  Ingresos: "cash",
-  Gastos: "cart",
-  Ahorros: "wallet",
-  Deudas: "card",
-  "Préstamos": "people",
-  Propiedades: "business",
-  "Vehículo": "car",
-  Inversiones: "trending-up",
-  Eventos: "airplane",
+const PANTALLAS: Record<string, React.ComponentType<any>> = {
+  Dashboard: DashboardScreen,
+  Ingresos: IngresosScreen,
+  Gastos: GastosScreen,
+  Ahorros: AhorrosScreen,
+  Deudas: DeudasScreen,
+  Prestamos: PrestamosScreen,
+  Propiedades: PropiedadesScreen,
+  Vehiculo: VehiculoScreen,
+  Inversiones: InversionesScreen,
+  Eventos: EventosScreen,
 };
 
-function HomeTabs() {
+const ENTRADAS_MENU: EntradaMenu[] = [
+  { tipo: "item", item: { key: "Dashboard", label: "Resumen", icon: "home" } },
+  {
+    tipo: "seccion",
+    seccion: {
+      key: "finanzas",
+      label: "Finanzas diarias",
+      icon: "cash",
+      items: [
+        { key: "Ingresos", label: "Ingresos", icon: "cash" },
+        { key: "Gastos", label: "Gastos", icon: "cart" },
+      ],
+    },
+  },
+  {
+    tipo: "seccion",
+    seccion: {
+      key: "ahorros-deudas",
+      label: "Ahorros y deudas",
+      icon: "wallet",
+      items: [
+        { key: "Ahorros", label: "Ahorros", icon: "wallet" },
+        { key: "Deudas", label: "Deudas y créditos", icon: "card" },
+        { key: "Prestamos", label: "Préstamos personales", icon: "people" },
+      ],
+    },
+  },
+  {
+    tipo: "seccion",
+    seccion: {
+      key: "patrimonio",
+      label: "Patrimonio",
+      icon: "business",
+      items: [
+        { key: "Propiedades", label: "Propiedades", icon: "business" },
+        { key: "Vehiculo", label: "Vehículo rentado", icon: "car" },
+        { key: "Inversiones", label: "Inversiones", icon: "trending-up" },
+      ],
+    },
+  },
+  { tipo: "item", item: { key: "Eventos", label: "Eventos y viajes", icon: "airplane" } },
+];
+
+const TITULOS: Record<string, string> = {
+  Dashboard: "Resumen",
+  Ingresos: "Ingresos",
+  Gastos: "Gastos",
+  Ahorros: "Ahorros",
+  Deudas: "Deudas y créditos",
+  Prestamos: "Préstamos",
+  Propiedades: "Propiedades",
+  Vehiculo: "Vehículo",
+  Inversiones: "Inversiones",
+  Eventos: "Eventos y viajes",
+};
+
+function HomeShell() {
+  const insets = useSafeAreaInsets();
+  const [activeScreen, setActiveScreen] = useState("Dashboard");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const ActiveComponent = PANTALLAS[activeScreen];
+
   return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: { fontSize: 10, fontWeight: "600" },
-        tabBarStyle: { height: 62, paddingTop: 6, paddingBottom: 8, borderTopColor: colors.border },
-        tabBarIcon: ({ color, size }) => <Ionicons name={ICONS[route.name] ?? "ellipse"} size={size ? size - 2 : 20} color={color} />,
-      })}
-    >
-      <Tab.Screen name="Dashboard" component={DashboardScreen} />
-      <Tab.Screen name="Ingresos" component={IngresosScreen} />
-      <Tab.Screen name="Gastos" component={GastosScreen} />
-      <Tab.Screen name="Ahorros" component={AhorrosScreen} />
-      <Tab.Screen name="Deudas" component={DeudasScreen} />
-      <Tab.Screen name="Préstamos" component={PrestamosScreen} />
-      <Tab.Screen name="Propiedades" component={PropiedadesScreen} />
-      <Tab.Screen name="Vehículo" component={VehiculoScreen} />
-      <Tab.Screen name="Inversiones" component={InversionesScreen} />
-      <Tab.Screen name="Eventos" component={EventosScreen} />
-    </Tab.Navigator>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
+        <TouchableOpacity onPress={() => setMenuOpen(true)} style={styles.menuButton}>
+          <Ionicons name="menu" size={22} color={colors.white} />
+        </TouchableOpacity>
+        <Text style={styles.topBarTitle}>{TITULOS[activeScreen]}</Text>
+      </View>
+
+      <View style={{ flex: 1 }}>
+        <ActiveComponent />
+      </View>
+
+      <SideMenu
+        visible={menuOpen}
+        activeScreen={activeScreen}
+        entradas={ENTRADAS_MENU}
+        onSelect={(key) => {
+          setActiveScreen(key);
+          setMenuOpen(false);
+        }}
+        onClose={() => setMenuOpen(false)}
+      />
+    </View>
   );
 }
 
@@ -73,7 +136,13 @@ export default function AppNavigator() {
 
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {usuario ? <Stack.Screen name="Home" component={HomeTabs} /> : <Stack.Screen name="Login" component={LoginScreen} />}
+      {usuario ? <Stack.Screen name="Home" component={HomeShell} /> : <Stack.Screen name="Login" component={LoginScreen} />}
     </Stack.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  topBar: { flexDirection: "row", alignItems: "center", backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  menuButton: { marginRight: spacing.md, padding: 2 },
+  topBarTitle: { color: colors.white, fontSize: 17, fontWeight: "700" },
+});
