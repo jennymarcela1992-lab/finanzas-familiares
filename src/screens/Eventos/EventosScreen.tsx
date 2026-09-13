@@ -1,17 +1,11 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  Modal,
-} from "react-native";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Alert, Modal } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { usePresupuestosEvento, PresupuestoConItems, ItemPresupuestoRow } from "../../hooks/usePresupuestosEvento";
+import ScreenHeader from "../../components/ScreenHeader";
+import Card from "../../components/Card";
+import PrimaryButton from "../../components/PrimaryButton";
+import { colors, spacing, typography, radius } from "../../theme/theme";
 
 export default function EventosScreen() {
   const { presupuestos, cargando, error, crearPresupuesto, agregarItem, registrarValorReal } = usePresupuestosEvento();
@@ -49,8 +43,7 @@ export default function EventosScreen() {
     setGuardando(true);
     try {
       await agregarItem(presupuestoId, nombreItem.trim(), parseFloat(valorPlaneadoItem.replace(/[^0-9.]/g, "")));
-      setNombreItem("");
-      setValorPlaneadoItem("");
+      setNombreItem(""); setValorPlaneadoItem("");
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo agregar el ítem.");
     } finally {
@@ -63,8 +56,7 @@ export default function EventosScreen() {
     setGuardando(true);
     try {
       await registrarValorReal(itemSeleccionado.id, parseFloat(valorRealInput.replace(/[^0-9.]/g, "")));
-      setValorRealInput("");
-      setItemSeleccionado(null);
+      setValorRealInput(""); setItemSeleccionado(null);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo guardar el gasto real.");
     } finally {
@@ -74,82 +66,71 @@ export default function EventosScreen() {
 
   function renderEvento(p: PresupuestoConItems) {
     const abierto = eventoAbierto === p.id;
+    const positivo = p.diferencia >= 0;
     return (
-      <View style={styles.card}>
+      <Card>
         <TouchableOpacity onPress={() => setEventoAbierto(abierto ? null : p.id)}>
-          <Text style={styles.nombre}>{p.nombre}</Text>
-          <Text style={styles.meta}>
+          <View style={styles.rowStart}>
+            <View style={styles.iconoCircle}>
+              <Ionicons name="airplane" size={17} color={colors.primary} />
+            </View>
+            <Text style={typography.h3}>{p.nombre}</Text>
+          </View>
+          <Text style={[typography.body, { marginTop: spacing.sm }]}>
             Planeado: ${p.totalPlaneado.toLocaleString("es-CO")} · Real: ${p.totalReal.toLocaleString("es-CO")}
           </Text>
-          <Text style={[styles.diferencia, p.diferencia >= 0 ? styles.positivo : styles.negativo]}>
-            {p.diferencia >= 0 ? "Dentro del presupuesto por" : "Excedido por"} ${Math.abs(p.diferencia).toLocaleString("es-CO")}
-          </Text>
+          <View style={[styles.pill, positivo ? styles.pillSuccess : styles.pillWarning]}>
+            <Text style={[styles.pillText, positivo ? styles.pillTextSuccess : styles.pillTextWarning]}>
+              {positivo ? "Dentro del presupuesto por" : "Excedido por"} ${Math.abs(p.diferencia).toLocaleString("es-CO")}
+            </Text>
+          </View>
           <Text style={styles.hint}>{abierto ? "Ocultar ítems ▲" : "Ver ítems ▼"}</Text>
         </TouchableOpacity>
 
         {abierto && (
-          <View style={{ marginTop: 10 }}>
+          <View style={{ marginTop: spacing.sm }}>
             {p.items.map((it) => (
               <TouchableOpacity key={it.id} style={styles.itemRow} onPress={() => setItemSeleccionado(it)}>
                 <Text style={styles.itemNombre}>{it.nombre}</Text>
                 <Text style={styles.itemValores}>
-                  ${Number(it.valor_planeado).toLocaleString("es-CO")}
-                  {it.valor_real != null ? ` → real: $${Number(it.valor_real).toLocaleString("es-CO")}` : " (sin gasto real aún)"}
+                  ${Number(it.valor_planeado).toLocaleString("es-CO")}{it.valor_real != null ? ` → $${Number(it.valor_real).toLocaleString("es-CO")}` : " (sin real)"}
                 </Text>
               </TouchableOpacity>
             ))}
 
             <View style={styles.nuevoItemRow}>
-              <TextInput
-                style={[styles.input, { flex: 1.4, marginRight: 6, marginBottom: 0 }]}
-                placeholder="Nuevo ítem"
-                value={nombreItem}
-                onChangeText={setNombreItem}
-              />
-              <TextInput
-                style={[styles.input, { flex: 1, marginRight: 6, marginBottom: 0 }]}
-                placeholder="Planeado"
-                value={valorPlaneadoItem}
-                onChangeText={setValorPlaneadoItem}
-                keyboardType="numeric"
-              />
+              <TextInput style={[styles.input, { flex: 1.4, marginRight: 6, marginBottom: 0 }]} placeholder="Nuevo ítem" placeholderTextColor={colors.textMuted} value={nombreItem} onChangeText={setNombreItem} />
+              <TextInput style={[styles.input, { flex: 1, marginRight: 6, marginBottom: 0 }]} placeholder="Planeado" placeholderTextColor={colors.textMuted} value={valorPlaneadoItem} onChangeText={setValorPlaneadoItem} keyboardType="numeric" />
               <TouchableOpacity style={styles.miniBoton} onPress={() => manejarAgregarItem(p.id)}>
-                <Text style={styles.miniBotonTexto}>+</Text>
+                <Ionicons name="add" size={18} color={colors.white} />
               </TouchableOpacity>
             </View>
           </View>
         )}
-      </View>
+      </Card>
     );
   }
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Eventos y viajes</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => setMostrarForm(!mostrarForm)}>
-          <Text style={styles.addButtonText}>{mostrarForm ? "Cancelar" : "+ Nuevo"}</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader title="Eventos" subtitle="Viajes y presupuestos" actionLabel="Nuevo" onAction={() => setMostrarForm(!mostrarForm)} actionActive={mostrarForm} />
 
       {mostrarForm && (
-        <View style={styles.form}>
-          <TextInput style={styles.input} placeholder="Nombre (ej. Vacaciones diciembre)" value={nombre} onChangeText={setNombre} />
-          <TouchableOpacity style={styles.saveButton} onPress={manejarCrearEvento} disabled={guardando}>
-            {guardando ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Crear evento</Text>}
-          </TouchableOpacity>
-        </View>
+        <Card style={{ marginHorizontal: spacing.lg }}>
+          <TextInput style={styles.input} placeholder="Nombre (ej. Vacaciones diciembre)" placeholderTextColor={colors.textMuted} value={nombre} onChangeText={setNombre} />
+          <PrimaryButton title="Crear evento" onPress={manejarCrearEvento} loading={guardando} />
+        </Card>
       )}
 
       {cargando ? (
-        <ActivityIndicator style={{ marginTop: 24 }} />
+        <ActivityIndicator style={{ marginTop: 24 }} color={colors.primary} />
       ) : error ? (
         <Text style={styles.errorText}>Error cargando eventos: {error}</Text>
       ) : (
         <FlatList
           data={presupuestos}
           keyExtractor={(p) => p.id}
-          contentContainerStyle={{ padding: 16 }}
+          contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
           ListEmptyComponent={<Text style={styles.empty}>Todavía no hay eventos o viajes presupuestados.</Text>}
           renderItem={({ item: p }) => renderEvento(p)}
         />
@@ -158,14 +139,12 @@ export default function EventosScreen() {
       <Modal visible={!!itemSeleccionado} transparent animationType="slide">
         <View style={styles.modalFondo}>
           <View style={styles.modalCaja}>
-            <Text style={styles.title}>Gasto real: {itemSeleccionado?.nombre}</Text>
-            <Text style={styles.meta}>Planeado: ${Number(itemSeleccionado?.valor_planeado).toLocaleString("es-CO")}</Text>
-            <TextInput style={styles.input} placeholder="Valor real gastado" value={valorRealInput} onChangeText={setValorRealInput} keyboardType="numeric" />
-            <TouchableOpacity style={styles.saveButton} onPress={manejarRegistrarReal} disabled={guardando}>
-              {guardando ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Guardar</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setItemSeleccionado(null)} style={{ marginTop: 12 }}>
-              <Text style={{ textAlign: "center", color: "#5B5B5B" }}>Cancelar</Text>
+            <Text style={typography.h2}>Gasto real: {itemSeleccionado?.nombre}</Text>
+            <Text style={[typography.body, { marginBottom: spacing.sm }]}>Planeado: ${Number(itemSeleccionado?.valor_planeado).toLocaleString("es-CO")}</Text>
+            <TextInput style={styles.input} placeholder="Valor real gastado" placeholderTextColor={colors.textMuted} value={valorRealInput} onChangeText={setValorRealInput} keyboardType="numeric" />
+            <PrimaryButton title="Guardar" onPress={manejarRegistrarReal} loading={guardando} />
+            <TouchableOpacity onPress={() => setItemSeleccionado(null)} style={{ marginTop: spacing.md }}>
+              <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -175,30 +154,24 @@ export default function EventosScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16 },
-  title: { fontSize: 17, fontWeight: "bold", color: "#1A1A1A" },
-  addButton: { backgroundColor: "#1F6F5C", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  addButtonText: { color: "#fff", fontWeight: "bold", fontSize: 12 },
-  form: { paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: "#EEE" },
-  input: { backgroundColor: "#F5F5F5", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, fontSize: 14 },
-  saveButton: { backgroundColor: "#144B3F", borderRadius: 8, paddingVertical: 12, alignItems: "center" },
-  saveButtonText: { color: "#fff", fontWeight: "bold" },
-  card: { backgroundColor: "#F7F9F8", borderRadius: 12, padding: 14, marginBottom: 12 },
-  nombre: { fontSize: 15, fontWeight: "bold", color: "#1A1A1A" },
-  meta: { fontSize: 12, color: "#5B5B5B", marginTop: 4 },
-  diferencia: { fontSize: 13, fontWeight: "bold", marginTop: 4 },
-  positivo: { color: "#1F6F5C" },
-  negativo: { color: "#B5651D" },
-  hint: { fontSize: 11, color: "#AAA", marginTop: 6 },
-  itemRow: { paddingVertical: 6, borderTopWidth: 1, borderTopColor: "#EEE" },
-  itemNombre: { fontSize: 13, fontWeight: "600", color: "#333" },
-  itemValores: { fontSize: 12, color: "#5B5B5B" },
-  nuevoItemRow: { flexDirection: "row", marginTop: 8, alignItems: "center" },
-  miniBoton: { backgroundColor: "#1F6F5C", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  miniBotonTexto: { color: "#fff", fontWeight: "bold" },
-  empty: { textAlign: "center", color: "#888", marginTop: 40 },
-  errorText: { color: "red", padding: 16 },
-  modalFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 24 },
-  modalCaja: { backgroundColor: "#fff", borderRadius: 12, padding: 20 },
+  container: { flex: 1, backgroundColor: colors.background },
+  input: { backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm, fontSize: 14, color: colors.textPrimary },
+  rowStart: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  iconoCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
+  pill: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, marginTop: spacing.sm },
+  pillSuccess: { backgroundColor: colors.primaryLight },
+  pillWarning: { backgroundColor: "#FCEFD9" },
+  pillText: { fontSize: 11, fontWeight: "700" },
+  pillTextSuccess: { color: colors.success },
+  pillTextWarning: { color: colors.warning },
+  hint: { fontSize: 11, color: colors.textMuted, marginTop: spacing.sm },
+  itemRow: { paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border },
+  itemNombre: { fontSize: 13, fontWeight: "600", color: colors.textPrimary },
+  itemValores: { fontSize: 12, color: colors.textSecondary },
+  nuevoItemRow: { flexDirection: "row", marginTop: spacing.sm, alignItems: "center" },
+  miniBoton: { backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.sm },
+  empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
+  errorText: { color: colors.danger, padding: spacing.lg },
+  modalFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: spacing.xl },
+  modalCaja: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
 });

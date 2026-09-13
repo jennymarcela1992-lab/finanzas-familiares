@@ -1,18 +1,21 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
-  Switch,
-  Alert,
-} from "react-native";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useGastos, GastoRow } from "../../hooks/useGastos";
+import ScreenHeader from "../../components/ScreenHeader";
+import Card from "../../components/Card";
+import PrimaryButton from "../../components/PrimaryButton";
+import { colors, spacing, typography, radius } from "../../theme/theme";
 
 const RUBROS = ["Mercado", "Servicios", "Salidas y Eventos", "Salud", "Gastos Fijos", "Otro"];
+const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
+  Mercado: "cart",
+  Servicios: "flash",
+  "Salidas y Eventos": "sparkles",
+  Salud: "medkit",
+  "Gastos Fijos": "home",
+  Otro: "ellipsis-horizontal",
+};
 
 export default function GastosScreen() {
   const { gastos, cargando, error, agregarGasto, borrarGasto } = useGastos();
@@ -57,66 +60,62 @@ export default function GastosScreen() {
     ]);
   }
 
+  const totalMes = gastos.reduce((s, g) => s + Number(g.valor), 0);
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Gastos</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => setMostrarForm(!mostrarForm)}>
-          <Text style={styles.addButtonText}>{mostrarForm ? "Cancelar" : "+ Nuevo"}</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader title="Gastos" subtitle={`$${totalMes.toLocaleString("es-CO")} registrados`} actionLabel="Nuevo" onAction={() => setMostrarForm(!mostrarForm)} actionActive={mostrarForm} />
 
       {mostrarForm && (
-        <View style={styles.form}>
-          <TextInput style={styles.input} placeholder="¿Qué fue el gasto?" value={item} onChangeText={setItem} />
-          <TextInput style={styles.input} placeholder="Valor (ej. 45000)" value={valor} onChangeText={setValor} keyboardType="numeric" />
+        <Card style={styles.formCard}>
+          <TextInput style={styles.input} placeholder="¿Qué fue el gasto?" placeholderTextColor={colors.textMuted} value={item} onChangeText={setItem} />
+          <TextInput style={styles.input} placeholder="Valor (ej. 45000)" placeholderTextColor={colors.textMuted} value={valor} onChangeText={setValor} keyboardType="numeric" />
 
           <Text style={styles.label}>Rubro</Text>
-          <View style={styles.rubrosRow}>
+          <View style={styles.chipsRow}>
             {RUBROS.map((r) => (
-              <TouchableOpacity
-                key={r}
-                style={[styles.rubroChip, rubro === r && styles.rubroChipActivo]}
-                onPress={() => setRubro(r)}
-              >
-                <Text style={[styles.rubroChipText, rubro === r && styles.rubroChipTextActivo]}>{r}</Text>
+              <TouchableOpacity key={r} style={[styles.chip, rubro === r && styles.chipActivo]} onPress={() => setRubro(r)}>
+                <Ionicons name={ICONO_RUBRO[r]} size={13} color={rubro === r ? colors.white : colors.primary} />
+                <Text style={[styles.chipText, rubro === r && styles.chipTextActivo]}>{r}</Text>
               </TouchableOpacity>
             ))}
           </View>
 
           <View style={styles.switchRow}>
-            <Text style={styles.label}>¿Se divide entre los dos?</Text>
-            <Switch value={esCompartido} onValueChange={setEsCompartido} />
+            <Text style={typography.body}>¿Se divide entre los dos?</Text>
+            <Switch value={esCompartido} onValueChange={setEsCompartido} trackColor={{ true: colors.primary }} />
           </View>
 
-          <TextInput style={styles.input} placeholder="Nota (opcional)" value={nota} onChangeText={setNota} />
-
-          <TouchableOpacity style={styles.saveButton} onPress={manejarGuardar} disabled={guardando}>
-            {guardando ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Guardar gasto</Text>}
-          </TouchableOpacity>
-        </View>
+          <TextInput style={styles.input} placeholder="Nota (opcional)" placeholderTextColor={colors.textMuted} value={nota} onChangeText={setNota} />
+          <PrimaryButton title="Guardar gasto" onPress={manejarGuardar} loading={guardando} />
+        </Card>
       )}
 
       {cargando ? (
-        <ActivityIndicator style={{ marginTop: 24 }} />
+        <ActivityIndicator style={{ marginTop: 24 }} color={colors.primary} />
       ) : error ? (
         <Text style={styles.errorText}>Error cargando gastos: {error}</Text>
       ) : (
         <FlatList
           data={gastos}
           keyExtractor={(g) => g.id}
-          contentContainerStyle={{ padding: 16 }}
+          contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
           ListEmptyComponent={<Text style={styles.empty}>Todavía no hay gastos registrados.</Text>}
           renderItem={({ item: g }) => (
-            <TouchableOpacity style={styles.gastoRow} onLongPress={() => confirmarBorrado(g)}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.gastoItem}>{g.item}</Text>
-                <Text style={styles.gastoMeta}>
-                  {g.rubro} · {g.fecha} {g.usuario_pago_nombre ? `· pagó ${g.usuario_pago_nombre}` : ""}
-                </Text>
-                {g.nota && <Text style={styles.gastoNota}>{g.nota}</Text>}
-              </View>
-              <Text style={styles.gastoValor}>${Number(g.valor).toLocaleString("es-CO")}</Text>
+            <TouchableOpacity onLongPress={() => confirmarBorrado(g)} activeOpacity={0.8}>
+              <Card style={styles.gastoCard}>
+                <View style={styles.iconoRubro}>
+                  <Ionicons name={ICONO_RUBRO[g.rubro ?? "Otro"] ?? "pricetag"} size={18} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={typography.h3}>{g.item}</Text>
+                  <Text style={typography.caption}>
+                    {g.rubro} · {g.fecha} {g.usuario_pago_nombre ? `· pagó ${g.usuario_pago_nombre}` : ""}
+                  </Text>
+                  {g.nota && <Text style={styles.nota}>{g.nota}</Text>}
+                </View>
+                <Text style={styles.valor}>${Number(g.valor).toLocaleString("es-CO")}</Text>
+              </Card>
             </TouchableOpacity>
           )}
         />
@@ -126,27 +125,20 @@ export default function GastosScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16 },
-  title: { fontSize: 22, fontWeight: "bold", color: "#1A1A1A" },
-  addButton: { backgroundColor: "#1F6F5C", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  addButtonText: { color: "#fff", fontWeight: "bold" },
-  form: { paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: "#EEE" },
-  input: { backgroundColor: "#F5F5F5", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, fontSize: 15 },
-  label: { fontSize: 13, color: "#5B5B5B", marginBottom: 6 },
-  rubrosRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 },
-  rubroChip: { borderWidth: 1, borderColor: "#1F6F5C", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 5, marginRight: 6, marginBottom: 6 },
-  rubroChipActivo: { backgroundColor: "#1F6F5C" },
-  rubroChipText: { color: "#1F6F5C", fontSize: 12 },
-  rubroChipTextActivo: { color: "#fff" },
-  switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  saveButton: { backgroundColor: "#144B3F", borderRadius: 8, paddingVertical: 12, alignItems: "center", marginTop: 4 },
-  saveButtonText: { color: "#fff", fontWeight: "bold" },
-  gastoRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#F0F0F0" },
-  gastoItem: { fontSize: 15, fontWeight: "600", color: "#1A1A1A" },
-  gastoMeta: { fontSize: 12, color: "#5B5B5B", marginTop: 2 },
-  gastoNota: { fontSize: 12, color: "#888", marginTop: 2, fontStyle: "italic" },
-  gastoValor: { fontSize: 15, fontWeight: "bold", color: "#1F6F5C" },
-  empty: { textAlign: "center", color: "#888", marginTop: 40 },
-  errorText: { color: "red", padding: 16 },
+  container: { flex: 1, backgroundColor: colors.background },
+  formCard: { marginHorizontal: spacing.lg },
+  input: { backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm, fontSize: 15, color: colors.textPrimary },
+  label: { ...typography.caption, marginBottom: spacing.sm },
+  chipsRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: spacing.sm },
+  chip: { flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 6, marginRight: 6, marginBottom: 6 },
+  chipActivo: { backgroundColor: colors.primary },
+  chipText: { color: colors.primary, fontSize: 12, fontWeight: "600" },
+  chipTextActivo: { color: colors.white },
+  switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm, marginTop: 4 },
+  gastoCard: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  iconoRubro: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
+  nota: { fontSize: 12, color: colors.textMuted, marginTop: 2, fontStyle: "italic" },
+  valor: { fontSize: 15, fontWeight: "800", color: colors.primary },
+  empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
+  errorText: { color: colors.danger, padding: spacing.lg },
 });

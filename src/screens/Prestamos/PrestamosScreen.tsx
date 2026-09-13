@@ -1,16 +1,11 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  Modal,
-} from "react-native";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Alert, Modal } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { usePrestamos, PrestamoConAbonos } from "../../hooks/usePrestamos";
+import ScreenHeader from "../../components/ScreenHeader";
+import Card from "../../components/Card";
+import PrimaryButton from "../../components/PrimaryButton";
+import { colors, spacing, typography, radius } from "../../theme/theme";
 
 export default function PrestamosScreen() {
   const { prestamos, cargando, error, crearPrestamo, agregarAbono } = usePrestamos();
@@ -31,16 +26,8 @@ export default function PrestamosScreen() {
     }
     setGuardando(true);
     try {
-      await crearPrestamo({
-        quienPresta: quienPresta.trim(),
-        quienRecibe: quienRecibe.trim(),
-        monto: parseFloat(monto.replace(/[^0-9.]/g, "")),
-        motivo: motivo.trim() || undefined,
-      });
-      setQuienPresta("");
-      setQuienRecibe("");
-      setMonto("");
-      setMotivo("");
+      await crearPrestamo({ quienPresta: quienPresta.trim(), quienRecibe: quienRecibe.trim(), monto: parseFloat(monto.replace(/[^0-9.]/g, "")), motivo: motivo.trim() || undefined });
+      setQuienPresta(""); setQuienRecibe(""); setMonto(""); setMotivo("");
       setMostrarForm(false);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo registrar el préstamo.");
@@ -65,45 +52,42 @@ export default function PrestamosScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Préstamos personales</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => setMostrarForm(!mostrarForm)}>
-          <Text style={styles.addButtonText}>{mostrarForm ? "Cancelar" : "+ Nuevo"}</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader title="Préstamos" subtitle="Entre ustedes o con terceros" actionLabel="Nuevo" onAction={() => setMostrarForm(!mostrarForm)} actionActive={mostrarForm} />
 
       {mostrarForm && (
-        <View style={styles.form}>
-          <TextInput style={styles.input} placeholder="¿Quién prestó? (ej. Jenny)" value={quienPresta} onChangeText={setQuienPresta} />
-          <TextInput style={styles.input} placeholder="¿Quién recibió? (ej. Jhon, o un tercero)" value={quienRecibe} onChangeText={setQuienRecibe} />
-          <TextInput style={styles.input} placeholder="Monto" value={monto} onChangeText={setMonto} keyboardType="numeric" />
-          <TextInput style={styles.input} placeholder="Motivo (ej. pago moto)" value={motivo} onChangeText={setMotivo} />
-          <TouchableOpacity style={styles.saveButton} onPress={manejarCrear} disabled={guardando}>
-            {guardando ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Registrar préstamo</Text>}
-          </TouchableOpacity>
-        </View>
+        <Card style={{ marginHorizontal: spacing.lg }}>
+          <TextInput style={styles.input} placeholder="¿Quién prestó? (ej. Jenny)" placeholderTextColor={colors.textMuted} value={quienPresta} onChangeText={setQuienPresta} />
+          <TextInput style={styles.input} placeholder="¿Quién recibió? (ej. Jhon, o un tercero)" placeholderTextColor={colors.textMuted} value={quienRecibe} onChangeText={setQuienRecibe} />
+          <TextInput style={styles.input} placeholder="Monto" placeholderTextColor={colors.textMuted} value={monto} onChangeText={setMonto} keyboardType="numeric" />
+          <TextInput style={styles.input} placeholder="Motivo (ej. pago moto)" placeholderTextColor={colors.textMuted} value={motivo} onChangeText={setMotivo} />
+          <PrimaryButton title="Registrar préstamo" onPress={manejarCrear} loading={guardando} />
+        </Card>
       )}
 
       {cargando ? (
-        <ActivityIndicator style={{ marginTop: 24 }} />
+        <ActivityIndicator style={{ marginTop: 24 }} color={colors.primary} />
       ) : error ? (
         <Text style={styles.errorText}>Error cargando préstamos: {error}</Text>
       ) : (
         <FlatList
           data={prestamos}
           keyExtractor={(p) => p.id}
-          contentContainerStyle={{ padding: 16 }}
+          contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
           ListEmptyComponent={<Text style={styles.empty}>Todavía no hay préstamos registrados.</Text>}
           renderItem={({ item: p }) => (
-            <TouchableOpacity style={styles.card} onPress={() => setPrestamoSeleccionado(p)}>
-              <Text style={styles.nombre}>
-                {p.quien_presta} → {p.quien_recibe}
-              </Text>
-              {p.motivo && <Text style={styles.motivo}>{p.motivo}</Text>}
-              <Text style={styles.saldo}>
-                Saldo pendiente: ${p.saldoPendiente.toLocaleString("es-CO")} de ${Number(p.monto).toLocaleString("es-CO")}
-              </Text>
-              <Text style={styles.hint}>Toca para registrar un abono</Text>
+            <TouchableOpacity onPress={() => setPrestamoSeleccionado(p)} activeOpacity={0.85}>
+              <Card style={styles.rowStart}>
+                <View style={styles.iconoCircle}>
+                  <Ionicons name="swap-horizontal" size={17} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={typography.h3}>{p.quien_presta} → {p.quien_recibe}</Text>
+                  {p.motivo && <Text style={typography.caption}>{p.motivo}</Text>}
+                  <Text style={styles.saldo}>
+                    Saldo: ${p.saldoPendiente.toLocaleString("es-CO")} de ${Number(p.monto).toLocaleString("es-CO")}
+                  </Text>
+                </View>
+              </Card>
             </TouchableOpacity>
           )}
         />
@@ -112,16 +96,14 @@ export default function PrestamosScreen() {
       <Modal visible={!!prestamoSeleccionado} transparent animationType="slide">
         <View style={styles.modalFondo}>
           <View style={styles.modalCaja}>
-            <Text style={styles.title}>
+            <Text style={typography.h2}>
               Abono: {prestamoSeleccionado?.quien_presta} → {prestamoSeleccionado?.quien_recibe}
             </Text>
-            <Text style={styles.saldo}>Saldo actual: ${prestamoSeleccionado?.saldoPendiente.toLocaleString("es-CO")}</Text>
-            <TextInput style={styles.input} placeholder="Monto del abono" value={montoAbono} onChangeText={setMontoAbono} keyboardType="numeric" />
-            <TouchableOpacity style={styles.saveButton} onPress={manejarAbono} disabled={guardando}>
-              {guardando ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Guardar abono</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setPrestamoSeleccionado(null)} style={{ marginTop: 12 }}>
-              <Text style={{ textAlign: "center", color: "#5B5B5B" }}>Cancelar</Text>
+            <Text style={[typography.body, { marginBottom: spacing.md }]}>Saldo actual: ${prestamoSeleccionado?.saldoPendiente.toLocaleString("es-CO")}</Text>
+            <TextInput style={styles.input} placeholder="Monto del abono" placeholderTextColor={colors.textMuted} value={montoAbono} onChangeText={setMontoAbono} keyboardType="numeric" />
+            <PrimaryButton title="Guardar abono" onPress={manejarAbono} loading={guardando} />
+            <TouchableOpacity onPress={() => setPrestamoSeleccionado(null)} style={{ marginTop: spacing.md }}>
+              <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -131,22 +113,13 @@ export default function PrestamosScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16 },
-  title: { fontSize: 18, fontWeight: "bold", color: "#1A1A1A", marginBottom: 8 },
-  addButton: { backgroundColor: "#1F6F5C", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  addButtonText: { color: "#fff", fontWeight: "bold" },
-  form: { paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: "#EEE" },
-  input: { backgroundColor: "#F5F5F5", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, fontSize: 15 },
-  saveButton: { backgroundColor: "#144B3F", borderRadius: 8, paddingVertical: 12, alignItems: "center" },
-  saveButtonText: { color: "#fff", fontWeight: "bold" },
-  card: { backgroundColor: "#F7F9F8", borderRadius: 12, padding: 14, marginBottom: 12 },
-  nombre: { fontSize: 15, fontWeight: "bold", color: "#1A1A1A" },
-  motivo: { fontSize: 12, color: "#888", marginTop: 2, fontStyle: "italic" },
-  saldo: { fontSize: 13, color: "#1F6F5C", fontWeight: "600", marginTop: 6 },
-  hint: { fontSize: 11, color: "#AAA", marginTop: 4 },
-  empty: { textAlign: "center", color: "#888", marginTop: 40 },
-  errorText: { color: "red", padding: 16 },
-  modalFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 24 },
-  modalCaja: { backgroundColor: "#fff", borderRadius: 12, padding: 20 },
+  container: { flex: 1, backgroundColor: colors.background },
+  input: { backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm, fontSize: 15, color: colors.textPrimary },
+  rowStart: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  iconoCircle: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
+  saldo: { fontSize: 13, color: colors.primary, fontWeight: "700", marginTop: 4 },
+  empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
+  errorText: { color: colors.danger, padding: spacing.lg },
+  modalFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: spacing.xl },
+  modalCaja: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
 });

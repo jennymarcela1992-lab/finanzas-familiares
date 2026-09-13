@@ -1,21 +1,15 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  Modal,
-} from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert, Modal } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useCierreMensual } from "../../hooks/useCierreMensual";
 import { useAhorros } from "../../hooks/useAhorros";
 import { useAuth } from "../../hooks/useAuth";
+import Card from "../../components/Card";
+import PrimaryButton from "../../components/PrimaryButton";
+import { colors, spacing, typography, radius } from "../../theme/theme";
 
 export default function DashboardScreen() {
-  const { resumen, cargando, error, definirAporte, enviarExcedenteAAhorro, recargar } = useCierreMensual();
+  const { resumen, cargando, error, definirAporte, enviarExcedenteAAhorro } = useCierreMensual();
   const { metas } = useAhorros();
   const { usuario } = useAuth();
 
@@ -61,89 +55,124 @@ export default function DashboardScreen() {
     }
   }
 
-  if (cargando) return <ActivityIndicator style={{ marginTop: 40 }} />;
+  if (cargando) return <ActivityIndicator style={{ marginTop: 60 }} color={colors.primary} />;
   if (error) return <Text style={styles.errorText}>Error cargando el resumen: {error}</Text>;
   if (!resumen) return null;
 
+  const excedentePositivo = resumen.excedente >= 0;
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
-      <Text style={styles.title}>Resumen del hogar</Text>
-      <Text style={styles.mes}>{resumen.mes}</Text>
+    <ScrollView style={styles.container} contentContainerStyle={{ padding: spacing.lg }}>
+      <Text style={typography.h1}>Resumen del hogar</Text>
+      <Text style={[typography.caption, { marginBottom: spacing.lg }]}>{resumen.mes}</Text>
 
       {resumen.personas.length === 0 && (
-        <Text style={styles.empty}>
-          Todavía no hay aportes definidos ni gastos compartidos este mes. Registra gastos en la pestaña Gastos, o define un aporte abajo.
-        </Text>
+        <Card>
+          <Text style={typography.body}>
+            Todavía no hay aportes definidos ni gastos compartidos este mes. Registra gastos en la pestaña Gastos, o define un aporte abajo.
+          </Text>
+        </Card>
       )}
 
       {resumen.personas.map((p) => (
-        <View key={p.usuarioNombre} style={styles.personaCard}>
-          <Text style={styles.personaNombre}>{p.usuarioNombre}</Text>
-          <Text style={styles.linea}>Aporte comprometido: ${p.aporte.toLocaleString("es-CO")}</Text>
-          <Text style={styles.linea}>Pagado realmente: ${p.pagado.toLocaleString("es-CO")}</Text>
-          <Text style={[styles.saldo, p.saldo >= 0 ? styles.saldoPositivo : styles.saldoNegativo]}>
-            {p.saldo >= 0 ? `Debe aportar $${p.saldo.toLocaleString("es-CO")} más` : `Pagó $${Math.abs(p.saldo).toLocaleString("es-CO")} de más`}
-          </Text>
+        <Card key={p.usuarioNombre}>
+          <View style={styles.rowBetween}>
+            <View style={styles.avatarRow}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{p.usuarioNombre.charAt(0).toUpperCase()}</Text>
+              </View>
+              <Text style={typography.h3}>{p.usuarioNombre}</Text>
+            </View>
+            <View style={[styles.pill, p.saldo >= 0 ? styles.pillWarning : styles.pillSuccess]}>
+              <Text style={[styles.pillText, p.saldo >= 0 ? styles.pillTextWarning : styles.pillTextSuccess]}>
+                {p.saldo >= 0 ? `Debe $${p.saldo.toLocaleString("es-CO")}` : `+$${Math.abs(p.saldo).toLocaleString("es-CO")}`}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.rowBetween}>
+            <Text style={typography.body}>Aporte comprometido</Text>
+            <Text style={typography.h3}>${p.aporte.toLocaleString("es-CO")}</Text>
+          </View>
+          <View style={[styles.rowBetween, { marginTop: 4 }]}>
+            <Text style={typography.body}>Pagado realmente</Text>
+            <Text style={typography.h3}>${p.pagado.toLocaleString("es-CO")}</Text>
+          </View>
 
           {editandoAporte === p.usuarioNombre ? (
-            <View style={styles.editarRow}>
+            <View style={styles.editRow}>
               <TextInput
-                style={styles.input}
+                style={styles.editInput}
                 placeholder="Nuevo aporte"
                 value={nuevoAporte}
                 onChangeText={setNuevoAporte}
                 keyboardType="numeric"
                 autoFocus
               />
-              <TouchableOpacity style={styles.miniBoton} onPress={() => manejarGuardarAporte(p.usuarioNombre)} disabled={guardando}>
-                <Text style={styles.miniBotonTexto}>Guardar</Text>
+              <TouchableOpacity style={styles.editSaveBtn} onPress={() => manejarGuardarAporte(p.usuarioNombre)} disabled={guardando}>
+                <Ionicons name="checkmark" size={18} color={colors.white} />
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity onPress={() => setEditandoAporte(p.usuarioNombre)}>
-              <Text style={styles.editarLink}>Ajustar aporte de este mes</Text>
+            <TouchableOpacity onPress={() => setEditandoAporte(p.usuarioNombre)} style={styles.editLinkRow}>
+              <Ionicons name="pencil" size={13} color={colors.primary} />
+              <Text style={styles.editLink}>Ajustar aporte de este mes</Text>
             </TouchableOpacity>
           )}
-        </View>
+        </Card>
       ))}
 
-      <View style={styles.totalCard}>
-        <Text style={styles.totalTitulo}>Total del hogar</Text>
-        <Text style={styles.linea}>Aportes comprometidos: ${resumen.totalAportes.toLocaleString("es-CO")}</Text>
-        <Text style={styles.linea}>Total pagado: ${resumen.totalPagado.toLocaleString("es-CO")}</Text>
-        <Text style={[styles.excedente, resumen.excedente >= 0 ? styles.saldoPositivo : styles.saldoNegativo]}>
-          {resumen.excedente >= 0 ? `Excedente: $${resumen.excedente.toLocaleString("es-CO")}` : `Faltante: $${Math.abs(resumen.excedente).toLocaleString("es-CO")}`}
-        </Text>
+      <Card style={{ backgroundColor: colors.primary }}>
+        <Text style={[typography.h3, { color: colors.white }]}>Total del hogar</Text>
+        <View style={styles.divider} />
+        <View style={styles.rowBetween}>
+          <Text style={styles.totalLabel}>Aportes comprometidos</Text>
+          <Text style={styles.totalValue}>${resumen.totalAportes.toLocaleString("es-CO")}</Text>
+        </View>
+        <View style={[styles.rowBetween, { marginTop: 4 }]}>
+          <Text style={styles.totalLabel}>Total pagado</Text>
+          <Text style={styles.totalValue}>${resumen.totalPagado.toLocaleString("es-CO")}</Text>
+        </View>
+
+        <View style={styles.excedenteBox}>
+          <Ionicons name={excedentePositivo ? "trending-up" : "trending-down"} size={20} color={colors.white} />
+          <Text style={styles.excedenteText}>
+            {excedentePositivo ? "Excedente" : "Faltante"}: ${Math.abs(resumen.excedente).toLocaleString("es-CO")}
+          </Text>
+        </View>
 
         {resumen.excedente > 0 && (
-          <TouchableOpacity style={styles.saveButton} onPress={() => setMostrarEnviarExcedente(true)}>
-            <Text style={styles.saveButtonText}>Enviar excedente a una meta de ahorro</Text>
-          </TouchableOpacity>
+          <PrimaryButton
+            title="Enviar excedente a ahorro"
+            onPress={() => setMostrarEnviarExcedente(true)}
+            variant="secondary"
+            style={{ marginTop: spacing.md }}
+          />
         )}
-      </View>
+      </Card>
 
       <Modal visible={mostrarEnviarExcedente} transparent animationType="slide">
         <View style={styles.modalFondo}>
           <View style={styles.modalCaja}>
-            <Text style={styles.title}>Enviar excedente</Text>
-            <Text style={styles.linea}>Disponible: ${resumen.excedente.toLocaleString("es-CO")}</Text>
+            <Text style={typography.h2}>Enviar excedente</Text>
+            <Text style={[typography.body, { marginBottom: spacing.md }]}>Disponible: ${resumen.excedente.toLocaleString("es-CO")}</Text>
 
             <Text style={styles.label}>Elige la meta</Text>
-            <View style={styles.rubrosRow}>
+            <View style={styles.chipsRow}>
               {metas.map((m) => (
                 <TouchableOpacity key={m.id} style={[styles.chip, metaElegida === m.id && styles.chipActivo]} onPress={() => setMetaElegida(m.id)}>
                   <Text style={[styles.chipText, metaElegida === m.id && styles.chipTextActivo]}>{m.nombre}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            {metas.length === 0 && <Text style={styles.empty}>Primero crea una meta en la pestaña Ahorros.</Text>}
+            {metas.length === 0 && <Text style={typography.caption}>Primero crea una meta en la pestaña Ahorros.</Text>}
 
             <TextInput style={styles.input} placeholder="Monto a enviar" value={montoExcedente} onChangeText={setMontoExcedente} keyboardType="numeric" />
-            <TouchableOpacity style={styles.saveButton} onPress={manejarEnviarExcedente} disabled={guardando}>
-              {guardando ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Confirmar envío</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMostrarEnviarExcedente(false)} style={{ marginTop: 12 }}>
-              <Text style={{ textAlign: "center", color: "#5B5B5B" }}>Cancelar</Text>
+            <PrimaryButton title="Confirmar envío" onPress={manejarEnviarExcedente} loading={guardando} />
+            <TouchableOpacity onPress={() => setMostrarEnviarExcedente(false)} style={{ marginTop: spacing.md }}>
+              <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -153,33 +182,35 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  title: { fontSize: 20, fontWeight: "bold", color: "#1A1A1A" },
-  mes: { fontSize: 13, color: "#5B5B5B", marginBottom: 16 },
-  empty: { textAlign: "center", color: "#888", marginTop: 20, fontSize: 13 },
-  personaCard: { backgroundColor: "#F7F9F8", borderRadius: 12, padding: 14, marginBottom: 12 },
-  personaNombre: { fontSize: 15, fontWeight: "bold", color: "#1A1A1A", marginBottom: 6 },
-  linea: { fontSize: 13, color: "#5B5B5B" },
-  saldo: { fontSize: 14, fontWeight: "bold", marginTop: 6 },
-  saldoPositivo: { color: "#1F6F5C" },
-  saldoNegativo: { color: "#B5651D" },
-  editarLink: { color: "#1F6F5C", fontSize: 12, marginTop: 8, fontWeight: "600" },
-  editarRow: { flexDirection: "row", marginTop: 8, alignItems: "center" },
-  input: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#DDD", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10, fontSize: 14, flex: 1, marginRight: 8 },
-  miniBoton: { backgroundColor: "#1F6F5C", paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8 },
-  miniBotonTexto: { color: "#fff", fontWeight: "bold", fontSize: 12 },
-  totalCard: { backgroundColor: "#1F6F5C", borderRadius: 12, padding: 16, marginTop: 8 },
-  totalTitulo: { fontSize: 15, fontWeight: "bold", color: "#fff", marginBottom: 6 },
-  excedente: { fontSize: 16, fontWeight: "bold", marginTop: 8, color: "#fff" },
-  saveButton: { backgroundColor: "#144B3F", borderRadius: 8, paddingVertical: 12, alignItems: "center", marginTop: 12 },
-  saveButtonText: { color: "#fff", fontWeight: "bold" },
-  errorText: { color: "red", padding: 16 },
-  modalFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 24 },
-  modalCaja: { backgroundColor: "#fff", borderRadius: 12, padding: 20 },
-  label: { fontSize: 13, color: "#5B5B5B", marginTop: 8, marginBottom: 6 },
-  rubrosRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: 10 },
-  chip: { borderWidth: 1, borderColor: "#1F6F5C", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 5, marginRight: 6, marginBottom: 6 },
-  chipActivo: { backgroundColor: "#1F6F5C" },
-  chipText: { color: "#1F6F5C", fontSize: 12 },
-  chipTextActivo: { color: "#fff" },
+  container: { flex: 1, backgroundColor: colors.background },
+  rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  avatarRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
+  avatarText: { color: colors.primary, fontWeight: "800" },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.sm },
+  pill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill },
+  pillWarning: { backgroundColor: "#FCEFD9" },
+  pillSuccess: { backgroundColor: colors.primaryLight },
+  pillText: { fontSize: 11, fontWeight: "700" },
+  pillTextWarning: { color: colors.warning },
+  pillTextSuccess: { color: colors.success },
+  editRow: { flexDirection: "row", alignItems: "center", marginTop: spacing.md, gap: 8 },
+  editInput: { flex: 1, backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
+  editSaveBtn: { backgroundColor: colors.primary, padding: 9, borderRadius: radius.sm },
+  editLinkRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: spacing.md },
+  editLink: { color: colors.primary, fontSize: 12, fontWeight: "600" },
+  totalLabel: { color: "rgba(255,255,255,0.75)", fontSize: 13 },
+  totalValue: { color: colors.white, fontWeight: "700", fontSize: 14 },
+  excedenteBox: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.md, backgroundColor: "rgba(255,255,255,0.12)", padding: spacing.sm, borderRadius: radius.sm },
+  excedenteText: { color: colors.white, fontWeight: "800", fontSize: 15 },
+  errorText: { color: colors.danger, padding: spacing.lg },
+  modalFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: spacing.xl },
+  modalCaja: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
+  label: { ...typography.caption, marginBottom: spacing.sm },
+  chipsRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: spacing.sm },
+  chip: { borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6, marginRight: 6, marginBottom: 6 },
+  chipActivo: { backgroundColor: colors.primary },
+  chipText: { color: colors.primary, fontSize: 12, fontWeight: "600" },
+  chipTextActivo: { color: colors.white },
+  input: { backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.md, fontSize: 15 },
 });

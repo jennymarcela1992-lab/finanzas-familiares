@@ -1,16 +1,12 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  Modal,
-} from "react-native";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Alert, Modal } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useAhorros, MetaAhorro } from "../../hooks/useAhorros";
+import ScreenHeader from "../../components/ScreenHeader";
+import Card from "../../components/Card";
+import ProgressBar from "../../components/ProgressBar";
+import PrimaryButton from "../../components/PrimaryButton";
+import { colors, spacing, typography, radius } from "../../theme/theme";
 
 export default function AhorrosScreen() {
   const { metas, cargando, error, crearMeta, agregarAporte } = useAhorros();
@@ -58,43 +54,44 @@ export default function AhorrosScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Ahorros</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => setMostrarNuevaMeta(!mostrarNuevaMeta)}>
-          <Text style={styles.addButtonText}>{mostrarNuevaMeta ? "Cancelar" : "+ Meta"}</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader title="Ahorros" subtitle={`${metas.length} meta(s) activa(s)`} actionLabel="Meta" actionIcon="flag" onAction={() => setMostrarNuevaMeta(!mostrarNuevaMeta)} actionActive={mostrarNuevaMeta} />
 
       {mostrarNuevaMeta && (
-        <View style={styles.form}>
-          <TextInput style={styles.input} placeholder="Nombre de la meta (ej. Vacaciones)" value={nombreMeta} onChangeText={setNombreMeta} />
-          <TextInput style={styles.input} placeholder="Monto objetivo" value={montoObjetivo} onChangeText={setMontoObjetivo} keyboardType="numeric" />
-          <TouchableOpacity style={styles.saveButton} onPress={manejarCrearMeta} disabled={guardando}>
-            {guardando ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Crear meta</Text>}
-          </TouchableOpacity>
-        </View>
+        <Card style={{ marginHorizontal: spacing.lg }}>
+          <TextInput style={styles.input} placeholder="Nombre de la meta (ej. Vacaciones)" placeholderTextColor={colors.textMuted} value={nombreMeta} onChangeText={setNombreMeta} />
+          <TextInput style={styles.input} placeholder="Monto objetivo" placeholderTextColor={colors.textMuted} value={montoObjetivo} onChangeText={setMontoObjetivo} keyboardType="numeric" />
+          <PrimaryButton title="Crear meta" onPress={manejarCrearMeta} loading={guardando} />
+        </Card>
       )}
 
       {cargando ? (
-        <ActivityIndicator style={{ marginTop: 24 }} />
+        <ActivityIndicator style={{ marginTop: 24 }} color={colors.primary} />
       ) : error ? (
         <Text style={styles.errorText}>Error cargando ahorros: {error}</Text>
       ) : (
         <FlatList
           data={metas}
           keyExtractor={(m) => m.id}
-          contentContainerStyle={{ padding: 16 }}
+          contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
           ListEmptyComponent={<Text style={styles.empty}>Todavía no hay metas de ahorro.</Text>}
           renderItem={({ item: m }) => (
-            <TouchableOpacity style={styles.metaCard} onPress={() => setMetaSeleccionada(m)}>
-              <Text style={styles.metaNombre}>{m.nombre}</Text>
-              <View style={styles.progresoFondo}>
-                <View style={[styles.progresoRelleno, { width: `${m.progreso * 100}%` }]} />
-              </View>
-              <Text style={styles.metaMonto}>
-                ${m.totalAportado.toLocaleString("es-CO")} de ${m.monto_objetivo.toLocaleString("es-CO")} ({Math.round(m.progreso * 100)}%)
-              </Text>
-              <Text style={styles.metaHint}>Toca para agregar un aporte</Text>
+            <TouchableOpacity onPress={() => setMetaSeleccionada(m)} activeOpacity={0.85}>
+              <Card>
+                <View style={styles.rowBetween}>
+                  <View style={styles.iconoCircle}>
+                    <Ionicons name="flag" size={18} color={colors.primary} />
+                  </View>
+                  <Text style={styles.pctText}>{Math.round(m.progreso * 100)}%</Text>
+                </View>
+                <Text style={[typography.h3, { marginTop: spacing.sm }]}>{m.nombre}</Text>
+                <View style={{ marginTop: spacing.sm, marginBottom: spacing.xs }}>
+                  <ProgressBar progreso={m.progreso} />
+                </View>
+                <Text style={typography.caption}>
+                  ${m.totalAportado.toLocaleString("es-CO")} de ${m.monto_objetivo.toLocaleString("es-CO")}
+                </Text>
+                <Text style={styles.hint}>Toca para agregar un aporte</Text>
+              </Card>
             </TouchableOpacity>
           )}
         />
@@ -103,14 +100,12 @@ export default function AhorrosScreen() {
       <Modal visible={!!metaSeleccionada} transparent animationType="slide">
         <View style={styles.modalFondo}>
           <View style={styles.modalCaja}>
-            <Text style={styles.title}>Aportar a "{metaSeleccionada?.nombre}"</Text>
-            <TextInput style={styles.input} placeholder="Monto" value={montoAporte} onChangeText={setMontoAporte} keyboardType="numeric" />
-            <TextInput style={styles.input} placeholder="Nota (ej. Enviado a Nu)" value={notaAporte} onChangeText={setNotaAporte} />
-            <TouchableOpacity style={styles.saveButton} onPress={manejarAgregarAporte} disabled={guardando}>
-              {guardando ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Guardar aporte</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMetaSeleccionada(null)} style={{ marginTop: 12 }}>
-              <Text style={{ textAlign: "center", color: "#5B5B5B" }}>Cancelar</Text>
+            <Text style={typography.h2}>Aportar a "{metaSeleccionada?.nombre}"</Text>
+            <TextInput style={styles.input} placeholder="Monto" placeholderTextColor={colors.textMuted} value={montoAporte} onChangeText={setMontoAporte} keyboardType="numeric" />
+            <TextInput style={styles.input} placeholder="Nota (ej. Enviado a Nu)" placeholderTextColor={colors.textMuted} value={notaAporte} onChangeText={setNotaAporte} />
+            <PrimaryButton title="Guardar aporte" onPress={manejarAgregarAporte} loading={guardando} />
+            <TouchableOpacity onPress={() => setMetaSeleccionada(null)} style={{ marginTop: spacing.md }}>
+              <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -120,23 +115,14 @@ export default function AhorrosScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16 },
-  title: { fontSize: 20, fontWeight: "bold", color: "#1A1A1A", marginBottom: 12 },
-  addButton: { backgroundColor: "#1F6F5C", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  addButtonText: { color: "#fff", fontWeight: "bold" },
-  form: { paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: "#EEE" },
-  input: { backgroundColor: "#F5F5F5", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, fontSize: 15 },
-  saveButton: { backgroundColor: "#144B3F", borderRadius: 8, paddingVertical: 12, alignItems: "center" },
-  saveButtonText: { color: "#fff", fontWeight: "bold" },
-  metaCard: { backgroundColor: "#F7F9F8", borderRadius: 12, padding: 14, marginBottom: 12 },
-  metaNombre: { fontSize: 16, fontWeight: "bold", color: "#1A1A1A", marginBottom: 8 },
-  progresoFondo: { height: 10, backgroundColor: "#E0E0E0", borderRadius: 6, overflow: "hidden" },
-  progresoRelleno: { height: 10, backgroundColor: "#1F6F5C" },
-  metaMonto: { fontSize: 13, color: "#5B5B5B", marginTop: 8 },
-  metaHint: { fontSize: 11, color: "#AAA", marginTop: 2 },
-  empty: { textAlign: "center", color: "#888", marginTop: 40 },
-  errorText: { color: "red", padding: 16 },
-  modalFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 24 },
-  modalCaja: { backgroundColor: "#fff", borderRadius: 12, padding: 20 },
+  container: { flex: 1, backgroundColor: colors.background },
+  input: { backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm, fontSize: 15, color: colors.textPrimary },
+  rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  iconoCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
+  pctText: { ...typography.h3, color: colors.primary },
+  hint: { fontSize: 11, color: colors.textMuted, marginTop: 6 },
+  empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
+  errorText: { color: colors.danger, padding: spacing.lg },
+  modalFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: spacing.xl },
+  modalCaja: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
 });
