@@ -116,7 +116,7 @@ export default function SideMenu({ visible, activeScreen, entradas, onSelect, on
 
 const styles = StyleSheet.create({
   overlayWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 50 },
-  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(13,74,63,0.35)" },
+  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(6,29,61,0.35)" },
   panel: { position: "absolute", top: 0, bottom: 0, left: 0, backgroundColor: colors.surface, paddingHorizontal: spacing.lg, paddingBottom: spacing.xl },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: spacing.sm },
   brandIcon: { width: 28, height: 28, borderRadius: 8, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },

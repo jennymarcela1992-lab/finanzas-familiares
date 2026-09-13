@@ -1,8 +1,8 @@
 export const colors = {
-  primary: "#146B5C",
-  primaryDark: "#0D4A3F",
-  primaryLight: "#E3F2EE",
-  accent: "#E8A33D",
+  primary: "#0A2E5C",
+  primaryDark: "#061D3D",
+  primaryLight: "#E3EAF3",
+  accent: "#FF8C2E",
   background: "#F7F8FA",
   surface: "#FFFFFF",
   border: "#E7EBEA",
@@ -41,7 +41,7 @@ export const typography = {
 };
 
 export const shadow = {
-  shadowColor: "#0D4A3F",
+  shadowColor: "#061D3D",
   shadowOffset: { width: 0, height: 4 },
   shadowOpacity: 0.06,
   shadowRadius: 10,
