@@ -16,6 +16,9 @@ export interface GastoRow {
   es_recurrente: boolean;
   comprobante_url: string | null;
   borrado: boolean;
+  borrado_por: string | null;
+  restaurado_por: string | null;
+  restaurado_en: string | null;
 }
 
 export interface NuevoGasto {
@@ -99,13 +102,23 @@ export function useGastos() {
   }
 
   async function moverAPapelera(id: string) {
-    const { error: err } = await supabase.from("gastos").update({ borrado: true, fecha_borrado: new Date().toISOString() }).eq("id", id);
+    const { data: sesion } = await supabase.auth.getUser();
+    const nombre = sesion.user?.user_metadata?.nombre ?? sesion.user?.email ?? "Alguien";
+    const { error: err } = await supabase
+      .from("gastos")
+      .update({ borrado: true, fecha_borrado: new Date().toISOString(), borrado_por: nombre })
+      .eq("id", id);
     if (err) throw err;
     await cargarGastos();
   }
 
   async function restaurarGasto(id: string) {
-    const { error: err } = await supabase.from("gastos").update({ borrado: false, fecha_borrado: null }).eq("id", id);
+    const { data: sesion } = await supabase.auth.getUser();
+    const nombre = sesion.user?.user_metadata?.nombre ?? sesion.user?.email ?? "Alguien";
+    const { error: err } = await supabase
+      .from("gastos")
+      .update({ borrado: false, restaurado_por: nombre, restaurado_en: new Date().toISOString() })
+      .eq("id", id);
     if (err) throw err;
     await cargarGastos();
   }
@@ -116,5 +129,26 @@ export function useGastos() {
     await cargarGastos();
   }
 
-  return { gastos, papelera, cargando, error, agregarGasto, moverAPapelera, restaurarGasto, borrarGasto, recargar: cargarGastos };
+  function generarCSV(lista: GastoRow[]): string {
+    const encabezado = "Fecha,Item,Valor,Rubro,Pagado por,Compartido,Nota\n";
+    const filas = lista
+      .map((g) =>
+        [g.fecha, `"${g.item.replace(/"/g, '""')}"`, g.valor, g.rubro ?? "", g.usuario_pago_nombre ?? "", g.es_compartido ? "Sí" : "No", `"${(g.nota ?? "").replace(/"/g, '""')}"`].join(",")
+      )
+      .join("\n");
+    return encabezado + filas;
+  }
+
+  return {
+    gastos,
+    papelera,
+    cargando,
+    error,
+    agregarGasto,
+    moverAPapelera,
+    restaurarGasto,
+    borrarGasto,
+    generarCSV,
+    recargar: cargarGastos,
+  };
 }

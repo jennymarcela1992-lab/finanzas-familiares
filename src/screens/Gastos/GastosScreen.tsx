@@ -3,6 +3,8 @@ import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Activity
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import { useGastos, GastoRow } from "../../hooks/useGastos";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
@@ -20,7 +22,7 @@ const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function GastosScreen() {
-  const { gastos, papelera, cargando, error, agregarGasto, moverAPapelera, restaurarGasto, borrarGasto } = useGastos();
+  const { gastos, papelera, cargando, error, agregarGasto, moverAPapelera, restaurarGasto, borrarGasto, generarCSV } = useGastos();
   const [verPapelera, setVerPapelera] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [filtroRubro, setFiltroRubro] = useState<string | null>(null);
@@ -96,6 +98,33 @@ export default function GastosScreen() {
 
   const totalMes = gastos.reduce((s, g) => s + Number(g.valor), 0);
 
+  async function descargarReporte() {
+    const csv = generarCSV(listaFiltrada);
+    const nombreArchivo = `gastos_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    if (Platform.OS === "web") {
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const enlace = document.createElement("a");
+      enlace.href = url;
+      enlace.download = nombreArchivo;
+      document.body.appendChild(enlace);
+      enlace.click();
+      document.body.removeChild(enlace);
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const ruta = FileSystem.documentDirectory + nombreArchivo;
+    await FileSystem.writeAsStringAsync(ruta, csv, { encoding: FileSystem.EncodingType.UTF8 });
+    const disponible = await Sharing.isAvailableAsync();
+    if (disponible) {
+      await Sharing.shareAsync(ruta, { mimeType: "text/csv", dialogTitle: "Reporte de gastos" });
+    } else {
+      Alert.alert("Reporte guardado", `Se guardó en: ${ruta}`);
+    }
+  }
+
   const listaFiltrada = (verPapelera ? papelera : gastos).filter((g) => {
     const coincideBusqueda = !busqueda.trim() || g.item.toLowerCase().includes(busqueda.toLowerCase()) || g.nota?.toLowerCase().includes(busqueda.toLowerCase());
     const coincideRubro = !filtroRubro || g.rubro === filtroRubro;
@@ -111,6 +140,9 @@ export default function GastosScreen() {
           <Ionicons name="search" size={15} color={colors.textMuted} />
           <TextInput style={styles.buscadorInput} placeholder="Buscar gasto o nota..." placeholderTextColor={colors.textMuted} value={busqueda} onChangeText={setBusqueda} />
         </View>
+        <TouchableOpacity style={styles.papeleraBoton} onPress={descargarReporte}>
+          <Ionicons name="download" size={16} color={colors.textSecondary} />
+        </TouchableOpacity>
         <TouchableOpacity style={[styles.papeleraBoton, verPapelera && styles.papeleraBotonActivo]} onPress={() => setVerPapelera(!verPapelera)}>
           <Ionicons name="trash" size={16} color={verPapelera ? colors.white : colors.textSecondary} />
         </TouchableOpacity>
@@ -209,6 +241,7 @@ export default function GastosScreen() {
                     {g.rubro} · {g.fecha} {g.usuario_pago_nombre ? `· pagó ${g.usuario_pago_nombre}` : ""}
                   </Text>
                   {g.nota && <Text style={styles.nota}>{g.nota}</Text>}
+                  {verPapelera && g.borrado_por && <Text style={styles.historialTexto}>Borrado por {g.borrado_por}</Text>}
                 </View>
                 {g.comprobante_url && (
                   <TouchableOpacity onPress={() => setFotoAmpliada(g.comprobante_url)}>
@@ -269,6 +302,7 @@ const styles = StyleSheet.create({
   papeleraBotonActivo: { backgroundColor: colors.danger, borderColor: colors.danger },
   chipsRowFiltro: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
   restaurarBoton: { marginLeft: spacing.sm, padding: 6 },
+  historialTexto: { fontSize: 11, color: colors.danger, marginTop: 2, fontStyle: "italic" },
   empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
   errorText: { color: colors.danger, padding: spacing.lg },
 });
