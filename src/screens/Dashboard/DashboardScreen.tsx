@@ -4,7 +4,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { useCierreMensual } from "../../hooks/useCierreMensual";
 import { useAhorros } from "../../hooks/useAhorros";
 import { useAuth } from "../../hooks/useAuth";
+import { useResumenGastos } from "../../hooks/useResumenGastos";
 import Card from "../../components/Card";
+import BarChart from "../../components/BarChart";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 
@@ -12,6 +14,7 @@ export default function DashboardScreen() {
   const { resumen, cargando, error, definirAporte, enviarExcedenteAAhorro } = useCierreMensual();
   const { metas } = useAhorros();
   const { usuario } = useAuth();
+  const { porRubro, porPersona } = useResumenGastos();
 
   const [editandoAporte, setEditandoAporte] = useState<string | null>(null);
   const [nuevoAporte, setNuevoAporte] = useState("");
@@ -123,6 +126,20 @@ export default function DashboardScreen() {
           )}
         </Card>
       ))}
+
+      <Card>
+        <Text style={typography.h3}>Gastos por rubro este mes</Text>
+        <View style={{ marginTop: spacing.md }}>
+          <BarChart data={porRubro} />
+        </View>
+      </Card>
+
+      <Card>
+        <Text style={typography.h3}>Gastos por persona este mes</Text>
+        <View style={{ marginTop: spacing.md }}>
+          <BarChart data={porPersona} colorBarra={colors.accent} />
+        </View>
+      </Card>
 
       <Card style={{ backgroundColor: colors.primary }}>
         <Text style={[typography.h3, { color: colors.white }]}>Total del hogar</Text>
