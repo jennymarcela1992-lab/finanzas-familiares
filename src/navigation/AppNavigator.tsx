@@ -102,7 +102,7 @@ function HomeShell() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity onPress={() => setMenuOpen(true)} style={styles.menuButton}>
-          <Ionicons name="menu" size={22} color={colors.white} />
+          <Text style={styles.menuIconTexto}>☰</Text>
         </TouchableOpacity>
         <Text style={styles.topBarTitle}>{TITULOS[activeScreen]}</Text>
       </View>
@@ -191,6 +191,7 @@ export default function AppNavigator() {
 const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   menuButton: { marginRight: spacing.md, padding: 2 },
+  menuIconTexto: { fontSize: 20, color: colors.white, fontWeight: "700" },
   topBarTitle: { color: colors.white, fontSize: 17, fontWeight: "700" },
   bloqueoContainer: { flex: 1, backgroundColor: colors.primary, justifyContent: "center", alignItems: "center", padding: spacing.xl },
   bloqueoIcono: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center", marginBottom: spacing.lg },

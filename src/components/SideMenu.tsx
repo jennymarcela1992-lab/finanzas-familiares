@@ -90,7 +90,7 @@ export default function SideMenu({ visible, activeScreen, entradas, onSelect, on
                     <Ionicons name={sec.icon} size={18} color={contieneActivo ? colors.primary : colors.textSecondary} />
                     <Text style={[styles.seccionLabel, contieneActivo && styles.seccionLabelActiva]}>{sec.label}</Text>
                   </View>
-                  <Ionicons name={abierta ? "chevron-down" : "chevron-forward"} size={16} color={colors.textMuted} />
+                  <Text style={styles.flechaTexto}>{abierta ? "⌄" : "›"}</Text>
                 </TouchableOpacity>
 
                 {abierta && (
@@ -129,6 +129,7 @@ const styles = StyleSheet.create({
   seccionHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   seccionLabel: { fontSize: 14, color: colors.textSecondary, fontWeight: "600" },
   seccionLabelActiva: { color: colors.primary },
+  flechaTexto: { fontSize: 16, color: colors.textMuted, fontWeight: "700" },
   subItemsWrap: { marginLeft: 30, marginBottom: 4 },
   subItemRow: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: radius.sm },
   subItemRowActivo: { backgroundColor: colors.primaryLight },
