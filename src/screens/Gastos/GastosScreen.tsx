@@ -20,7 +20,10 @@ const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function GastosScreen() {
-  const { gastos, cargando, error, agregarGasto, borrarGasto } = useGastos();
+  const { gastos, papelera, cargando, error, agregarGasto, moverAPapelera, restaurarGasto, borrarGasto } = useGastos();
+  const [verPapelera, setVerPapelera] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroRubro, setFiltroRubro] = useState<string | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
   const [item, setItem] = useState("");
   const [valor, setValor] = useState("");
@@ -78,17 +81,53 @@ export default function GastosScreen() {
   }
 
   function confirmarBorrado(g: GastoRow) {
-    Alert.alert("Eliminar gasto", `¿Borrar "${g.item}"?`, [
+    Alert.alert("Eliminar gasto", `¿Mover "${g.item}" a la papelera?`, [
       { text: "Cancelar", style: "cancel" },
-      { text: "Eliminar", style: "destructive", onPress: () => borrarGasto(g.id) },
+      { text: "Eliminar", style: "destructive", onPress: () => moverAPapelera(g.id) },
+    ]);
+  }
+
+  function confirmarBorradoDefinitivo(g: GastoRow) {
+    Alert.alert("Borrar para siempre", `"${g.item}" no se podrá recuperar. ¿Continuar?`, [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Borrar definitivo", style: "destructive", onPress: () => borrarGasto(g.id) },
     ]);
   }
 
   const totalMes = gastos.reduce((s, g) => s + Number(g.valor), 0);
 
+  const listaFiltrada = (verPapelera ? papelera : gastos).filter((g) => {
+    const coincideBusqueda = !busqueda.trim() || g.item.toLowerCase().includes(busqueda.toLowerCase()) || g.nota?.toLowerCase().includes(busqueda.toLowerCase());
+    const coincideRubro = !filtroRubro || g.rubro === filtroRubro;
+    return coincideBusqueda && coincideRubro;
+  });
+
   return (
     <View style={styles.container}>
       <ScreenHeader title="Gastos" subtitle={`$${totalMes.toLocaleString("es-CO")} registrados`} actionLabel="Nuevo" onAction={() => setMostrarForm(!mostrarForm)} actionActive={mostrarForm} />
+
+      <View style={styles.filtrosRow}>
+        <View style={styles.buscadorWrap}>
+          <Ionicons name="search" size={15} color={colors.textMuted} />
+          <TextInput style={styles.buscadorInput} placeholder="Buscar gasto o nota..." placeholderTextColor={colors.textMuted} value={busqueda} onChangeText={setBusqueda} />
+        </View>
+        <TouchableOpacity style={[styles.papeleraBoton, verPapelera && styles.papeleraBotonActivo]} onPress={() => setVerPapelera(!verPapelera)}>
+          <Ionicons name="trash" size={16} color={verPapelera ? colors.white : colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      {!verPapelera && (
+        <View style={styles.chipsRowFiltro}>
+          <TouchableOpacity style={[styles.chip, !filtroRubro && styles.chipActivo]} onPress={() => setFiltroRubro(null)}>
+            <Text style={[styles.chipText, !filtroRubro && styles.chipTextActivo]}>Todos</Text>
+          </TouchableOpacity>
+          {RUBROS.map((r) => (
+            <TouchableOpacity key={r} style={[styles.chip, filtroRubro === r && styles.chipActivo]} onPress={() => setFiltroRubro(filtroRubro === r ? null : r)}>
+              <Text style={[styles.chipText, filtroRubro === r && styles.chipTextActivo]}>{r}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {mostrarForm && (
         <Card style={styles.formCard}>
@@ -154,12 +193,12 @@ export default function GastosScreen() {
         <Text style={styles.errorText}>Error cargando gastos: {error}</Text>
       ) : (
         <FlatList
-          data={gastos}
+          data={listaFiltrada}
           keyExtractor={(g) => g.id}
           contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
-          ListEmptyComponent={<Text style={styles.empty}>Todavía no hay gastos registrados.</Text>}
+          ListEmptyComponent={<Text style={styles.empty}>{verPapelera ? "La papelera está vacía." : "Todavía no hay gastos registrados."}</Text>}
           renderItem={({ item: g }) => (
-            <TouchableOpacity onLongPress={() => confirmarBorrado(g)} activeOpacity={0.8}>
+            <TouchableOpacity onLongPress={() => (verPapelera ? confirmarBorradoDefinitivo(g) : confirmarBorrado(g))} activeOpacity={0.8}>
               <Card style={styles.gastoCard}>
                 <View style={styles.iconoRubro}>
                   <Ionicons name={ICONO_RUBRO[g.rubro ?? "Otro"] ?? "pricetag"} size={18} color={colors.primary} />
@@ -177,6 +216,11 @@ export default function GastosScreen() {
                   </TouchableOpacity>
                 )}
                 <Text style={styles.valor}>${Number(g.valor).toLocaleString("es-CO")}</Text>
+                {verPapelera && (
+                  <TouchableOpacity onPress={() => restaurarGasto(g.id)} style={styles.restaurarBoton}>
+                    <Ionicons name="arrow-undo" size={16} color={colors.primary} />
+                  </TouchableOpacity>
+                )}
               </Card>
             </TouchableOpacity>
           )}
@@ -218,6 +262,13 @@ const styles = StyleSheet.create({
   miniatura: { width: 40, height: 40, borderRadius: 8, marginRight: spacing.sm },
   visorFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.9)", justifyContent: "center", alignItems: "center" },
   visorImagen: { width: "90%", height: "80%" },
+  filtrosRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
+  buscadorWrap: { flex: 1, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.surface, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: colors.border },
+  buscadorInput: { flex: 1, fontSize: 13, color: colors.textPrimary },
+  papeleraBoton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, padding: 9 },
+  papeleraBotonActivo: { backgroundColor: colors.danger, borderColor: colors.danger },
+  chipsRowFiltro: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
+  restaurarBoton: { marginLeft: spacing.sm, padding: 6 },
   empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
   errorText: { color: colors.danger, padding: spacing.lg },
 });

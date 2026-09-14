@@ -15,6 +15,7 @@ export interface GastoRow {
   nota: string | null;
   es_recurrente: boolean;
   comprobante_url: string | null;
+  borrado: boolean;
 }
 
 export interface NuevoGasto {
@@ -47,19 +48,19 @@ async function subirComprobante(uriLocal: string): Promise<string | null> {
 
 export function useGastos() {
   const [gastos, setGastos] = useState<GastoRow[]>([]);
+  const [papelera, setPapelera] = useState<GastoRow[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const cargarGastos = useCallback(async () => {
     setCargando(true);
-    const { data, error: err } = await supabase
-      .from("gastos")
-      .select("*")
-      .order("fecha", { ascending: false });
+    const { data, error: err } = await supabase.from("gastos").select("*").order("fecha", { ascending: false });
     if (err) {
       setError(err.message);
     } else {
-      setGastos(data as GastoRow[]);
+      const todos = data as GastoRow[];
+      setGastos(todos.filter((g) => !g.borrado));
+      setPapelera(todos.filter((g) => g.borrado));
       setError(null);
     }
     setCargando(false);
@@ -97,11 +98,23 @@ export function useGastos() {
     await cargarGastos();
   }
 
+  async function moverAPapelera(id: string) {
+    const { error: err } = await supabase.from("gastos").update({ borrado: true, fecha_borrado: new Date().toISOString() }).eq("id", id);
+    if (err) throw err;
+    await cargarGastos();
+  }
+
+  async function restaurarGasto(id: string) {
+    const { error: err } = await supabase.from("gastos").update({ borrado: false, fecha_borrado: null }).eq("id", id);
+    if (err) throw err;
+    await cargarGastos();
+  }
+
   async function borrarGasto(id: string) {
     const { error: err } = await supabase.from("gastos").delete().eq("id", id);
     if (err) throw err;
     await cargarGastos();
   }
 
-  return { gastos, cargando, error, agregarGasto, borrarGasto, recargar: cargarGastos };
+  return { gastos, papelera, cargando, error, agregarGasto, moverAPapelera, restaurarGasto, borrarGasto, recargar: cargarGastos };
 }
