@@ -1,8 +1,9 @@
-import React, { useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as LocalAuthentication from "expo-local-authentication";
 
 import LoginScreen from "../screens/Auth/LoginScreen";
 import DashboardScreen from "../screens/Dashboard/DashboardScreen";
@@ -126,8 +127,47 @@ function HomeShell() {
   );
 }
 
+function PantallaBloqueo({ onDesbloquear, intentando }: { onDesbloquear: () => void; intentando: boolean }) {
+  return (
+    <View style={styles.bloqueoContainer}>
+      <View style={styles.bloqueoIcono}>
+        <Ionicons name="finger-print" size={40} color={colors.white} />
+      </View>
+      <Text style={styles.bloqueoTitulo}>Finanzas Familiares</Text>
+      <Text style={styles.bloqueoSubtitulo}>Usa tu huella o Face ID para continuar</Text>
+      <TouchableOpacity style={styles.bloqueoBoton} onPress={onDesbloquear} disabled={intentando}>
+        {intentando ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.bloqueoBotonTexto}>Desbloquear</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function AppNavigator() {
   const { usuario, cargando } = useAuth();
+  const [desbloqueado, setDesbloqueado] = useState(Platform.OS === "web");
+  const [verificando, setVerificando] = useState(false);
+
+  async function intentarDesbloquear() {
+    setVerificando(true);
+    try {
+      const hayHardware = await LocalAuthentication.hasHardwareAsync();
+      const estaEnrolado = await LocalAuthentication.isEnrolledAsync();
+      if (!hayHardware || !estaEnrolado) {
+        // El dispositivo no tiene huella/Face ID configurado: no forzamos el bloqueo
+        setDesbloqueado(true);
+        return;
+      }
+      const resultado = await LocalAuthentication.authenticateAsync({ promptMessage: "Desbloquea Finanzas Familiares" });
+      setDesbloqueado(resultado.success);
+    } finally {
+      setVerificando(false);
+    }
+  }
+
+  useEffect(() => {
+    if (Platform.OS === "web" || !usuario) return;
+    intentarDesbloquear();
+  }, [usuario?.id]);
 
   if (cargando) {
     return (
@@ -135,6 +175,10 @@ export default function AppNavigator() {
         <ActivityIndicator size="large" color="#fff" />
       </View>
     );
+  }
+
+  if (usuario && !desbloqueado) {
+    return <PantallaBloqueo onDesbloquear={intentarDesbloquear} intentando={verificando} />;
   }
 
   return (
@@ -148,4 +192,10 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   menuButton: { marginRight: spacing.md, padding: 2 },
   topBarTitle: { color: colors.white, fontSize: 17, fontWeight: "700" },
+  bloqueoContainer: { flex: 1, backgroundColor: colors.primary, justifyContent: "center", alignItems: "center", padding: spacing.xl },
+  bloqueoIcono: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center", marginBottom: spacing.lg },
+  bloqueoTitulo: { color: colors.white, fontSize: 20, fontWeight: "800", marginBottom: 6 },
+  bloqueoSubtitulo: { color: "rgba(255,255,255,0.75)", fontSize: 13, marginBottom: spacing.xl, textAlign: "center" },
+  bloqueoBoton: { backgroundColor: colors.white, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 32 },
+  bloqueoBotonTexto: { color: colors.primary, fontWeight: "700", fontSize: 15 },
 });
