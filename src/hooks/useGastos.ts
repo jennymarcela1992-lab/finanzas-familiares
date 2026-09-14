@@ -14,6 +14,7 @@ export interface GastoRow {
   metodo_pago: string | null;
   nota: string | null;
   es_recurrente: boolean;
+  comprobante_url: string | null;
 }
 
 export interface NuevoGasto {
@@ -26,6 +27,22 @@ export interface NuevoGasto {
   personaAsociada?: string;
   nota?: string;
   esRecurrente?: boolean;
+  comprobanteUri?: string; // uri local de la foto elegida, antes de subirla
+}
+
+async function subirComprobante(uriLocal: string): Promise<string | null> {
+  const respuesta = await fetch(uriLocal);
+  const blob = await respuesta.blob();
+  const extension = uriLocal.split(".").pop()?.split("?")[0] || "jpg";
+  const nombreArchivo = `${Date.now()}.${extension}`;
+
+  const { error: errSubida } = await supabase.storage.from("comprobantes").upload(nombreArchivo, blob, {
+    contentType: blob.type || "image/jpeg",
+  });
+  if (errSubida) throw errSubida;
+
+  const { data } = supabase.storage.from("comprobantes").getPublicUrl(nombreArchivo);
+  return data.publicUrl;
 }
 
 export function useGastos() {
@@ -56,6 +73,11 @@ export function useGastos() {
     const { data: sesion } = await supabase.auth.getUser();
     const usuario = sesion.user;
 
+    let comprobanteUrl: string | null = null;
+    if (nuevo.comprobanteUri) {
+      comprobanteUrl = await subirComprobante(nuevo.comprobanteUri);
+    }
+
     const { error: err } = await supabase.from("gastos").insert({
       fecha: nuevo.fecha,
       item: nuevo.item,
@@ -69,6 +91,7 @@ export function useGastos() {
       persona_asociada: nuevo.personaAsociada ?? null,
       nota: nuevo.nota ?? null,
       es_recurrente: nuevo.esRecurrente ?? false,
+      comprobante_url: comprobanteUrl,
     });
     if (err) throw err;
     await cargarGastos();

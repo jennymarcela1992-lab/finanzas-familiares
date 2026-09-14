@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, Alert, Platform } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, Alert, Platform, Image, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import * as ImagePicker from "expo-image-picker";
 import { useGastos, GastoRow } from "../../hooks/useGastos";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
@@ -28,7 +29,24 @@ export default function GastosScreen() {
   const [rubro, setRubro] = useState(RUBROS[0]);
   const [esCompartido, setEsCompartido] = useState(true);
   const [nota, setNota] = useState("");
+  const [comprobanteUri, setComprobanteUri] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+
+  async function elegirFoto() {
+    const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permiso.granted) {
+      Alert.alert("Permiso necesario", "Activa el acceso a fotos para adjuntar un comprobante.");
+      return;
+    }
+    const resultado = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.5,
+    });
+    if (!resultado.canceled && resultado.assets?.[0]) {
+      setComprobanteUri(resultado.assets[0].uri);
+    }
+  }
 
   async function manejarGuardar() {
     if (!item.trim() || !valor.trim()) {
@@ -44,11 +62,13 @@ export default function GastosScreen() {
         rubro,
         esCompartido,
         nota: nota.trim() || undefined,
+        comprobanteUri: comprobanteUri ?? undefined,
       });
       setItem("");
       setValor("");
       setNota("");
       setFecha(new Date());
+      setComprobanteUri(null);
       setMostrarForm(false);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo guardar el gasto.");
@@ -108,7 +128,23 @@ export default function GastosScreen() {
           </View>
 
           <TextInput style={styles.input} placeholder="Nota (opcional)" placeholderTextColor={colors.textMuted} value={nota} onChangeText={setNota} />
-          <PrimaryButton title="Guardar gasto" onPress={manejarGuardar} loading={guardando} />
+
+          {comprobanteUri ? (
+            <View style={styles.previewFila}>
+              <Image source={{ uri: comprobanteUri }} style={styles.previewImagen} />
+              <TouchableOpacity onPress={() => setComprobanteUri(null)} style={styles.quitarFotoBoton}>
+                <Ionicons name="trash" size={14} color={colors.danger} />
+                <Text style={styles.quitarFotoTexto}>Quitar foto</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={elegirFoto} style={styles.fotoBoton}>
+              <Ionicons name="camera" size={16} color={colors.primary} />
+              <Text style={styles.fotoBotonTexto}>Adjuntar foto del comprobante</Text>
+            </TouchableOpacity>
+          )}
+
+          <PrimaryButton title="Guardar gasto" onPress={manejarGuardar} loading={guardando} style={{ marginTop: spacing.sm }} />
         </Card>
       )}
 
@@ -135,12 +171,23 @@ export default function GastosScreen() {
                   </Text>
                   {g.nota && <Text style={styles.nota}>{g.nota}</Text>}
                 </View>
+                {g.comprobante_url && (
+                  <TouchableOpacity onPress={() => setFotoAmpliada(g.comprobante_url)}>
+                    <Image source={{ uri: g.comprobante_url }} style={styles.miniatura} />
+                  </TouchableOpacity>
+                )}
                 <Text style={styles.valor}>${Number(g.valor).toLocaleString("es-CO")}</Text>
               </Card>
             </TouchableOpacity>
           )}
         />
       )}
+
+      <Modal visible={!!fotoAmpliada} transparent animationType="fade">
+        <TouchableOpacity style={styles.visorFondo} activeOpacity={1} onPress={() => setFotoAmpliada(null)}>
+          {fotoAmpliada && <Image source={{ uri: fotoAmpliada }} style={styles.visorImagen} resizeMode="contain" />}
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -162,6 +209,15 @@ const styles = StyleSheet.create({
   iconoRubro: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
   nota: { fontSize: 12, color: colors.textMuted, marginTop: 2, fontStyle: "italic" },
   valor: { fontSize: 15, fontWeight: "800", color: colors.primary },
+  fotoBoton: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm },
+  fotoBotonTexto: { fontSize: 13, color: colors.primary, fontWeight: "600" },
+  previewFila: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  previewImagen: { width: 56, height: 56, borderRadius: radius.sm },
+  quitarFotoBoton: { flexDirection: "row", alignItems: "center", gap: 4 },
+  quitarFotoTexto: { fontSize: 12, color: colors.danger, fontWeight: "600" },
+  miniatura: { width: 40, height: 40, borderRadius: 8, marginRight: spacing.sm },
+  visorFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.9)", justifyContent: "center", alignItems: "center" },
+  visorImagen: { width: "90%", height: "80%" },
   empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
   errorText: { color: colors.danger, padding: spacing.lg },
 });
