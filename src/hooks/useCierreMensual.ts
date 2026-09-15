@@ -62,7 +62,7 @@ export function useCierreMensual(mes: string = mesActual()) {
       const aporteRow = (aportesData ?? []).find((a: any) => a.usuario_nombre === nombre);
       const pagado = (gastosData ?? [])
         .filter((g: any) => g.usuario_pago_nombre === nombre)
-        .reduce((s: number, g: any) => s + Number(g.valor), 0);
+        .reduce((s: number, g: any) => s + Number(g.valor_cop ?? g.valor), 0);
       const aporte = aporteRow ? Number(aporteRow.aporte) : 0;
       return { usuarioId: aporteRow?.usuario_id ?? null, usuarioNombre: nombre, aporte, pagado, saldo: aporte - pagado };
     });

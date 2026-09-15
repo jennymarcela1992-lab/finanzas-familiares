@@ -22,15 +22,16 @@ export function useResumenGastos(mes: string = mesActual()) {
     const [anio, mesNum] = mes.split("-").map(Number);
     const finMes = new Date(anio, mesNum, 0).toISOString().slice(0, 10);
 
-    const { data } = await supabase.from("gastos").select("rubro, valor, usuario_pago_nombre").gte("fecha", inicioMes).lte("fecha", finMes);
+    const { data } = await supabase.from("gastos").select("rubro, valor, valor_cop, usuario_pago_nombre").gte("fecha", inicioMes).lte("fecha", finMes).eq("borrado", false);
 
     const rubros: Record<string, number> = {};
     const personas: Record<string, number> = {};
     (data ?? []).forEach((g: any) => {
       const rubro = g.rubro || "Otro";
       const persona = g.usuario_pago_nombre || "Sin registrar";
-      rubros[rubro] = (rubros[rubro] || 0) + Number(g.valor);
-      personas[persona] = (personas[persona] || 0) + Number(g.valor);
+      const valorEnCop = Number(g.valor_cop ?? g.valor);
+      rubros[rubro] = (rubros[rubro] || 0) + valorEnCop;
+      personas[persona] = (personas[persona] || 0) + valorEnCop;
     });
 
     setPorRubro(Object.entries(rubros).map(([etiqueta, valor]) => ({ etiqueta, valor })).sort((a, b) => b.valor - a.valor));

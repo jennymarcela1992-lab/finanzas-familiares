@@ -7,6 +7,7 @@ export interface GastoRow {
   item: string;
   valor: number;
   moneda: string;
+  valor_cop: number | null;
   usuario_pago_nombre: string | null;
   persona_asociada: string | null;
   es_compartido: boolean;
@@ -32,6 +33,8 @@ export interface NuevoGasto {
   nota?: string;
   esRecurrente?: boolean;
   comprobanteUri?: string; // uri local de la foto elegida, antes de subirla
+  moneda?: string; // COP por defecto
+  valorCop?: number; // ya convertido a pesos, calculado con la tasa de cambio
 }
 
 async function subirComprobante(uriLocal: string): Promise<string | null> {
@@ -86,7 +89,8 @@ export function useGastos() {
       fecha: nuevo.fecha,
       item: nuevo.item,
       valor: nuevo.valor,
-      moneda: "COP",
+      moneda: nuevo.moneda ?? "COP",
+      valor_cop: nuevo.valorCop ?? nuevo.valor,
       usuario_pago_id: usuario?.id,
       usuario_pago_nombre: usuario?.user_metadata?.nombre ?? usuario?.email,
       rubro: nuevo.rubro,

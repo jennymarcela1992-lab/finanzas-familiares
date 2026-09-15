@@ -6,6 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useGastos, GastoRow } from "../../hooks/useGastos";
+import { useTasasCambio } from "../../hooks/useTasasCambio";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
@@ -23,6 +24,8 @@ const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 export default function GastosScreen() {
   const { gastos, papelera, cargando, error, agregarGasto, moverAPapelera, restaurarGasto, borrarGasto, generarCSV } = useGastos();
+  const { tasas, convertirACOP } = useTasasCambio();
+  const [moneda, setMoneda] = useState("COP");
   const [verPapelera, setVerPapelera] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [filtroRubro, setFiltroRubro] = useState<string | null>(null);
@@ -68,12 +71,15 @@ export default function GastosScreen() {
         esCompartido,
         nota: nota.trim() || undefined,
         comprobanteUri: comprobanteUri ?? undefined,
+        moneda,
+        valorCop: convertirACOP(parseFloat(valor.replace(/[^0-9.]/g, "")), moneda),
       });
       setItem("");
       setValor("");
       setNota("");
       setFecha(new Date());
       setComprobanteUri(null);
+      setMoneda("COP");
       setMostrarForm(false);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo guardar el gasto.");
@@ -96,7 +102,7 @@ export default function GastosScreen() {
     ]);
   }
 
-  const totalMes = gastos.reduce((s, g) => s + Number(g.valor), 0);
+  const totalMes = gastos.reduce((s, g) => s + Number(g.valor_cop ?? g.valor), 0);
 
   async function descargarReporte() {
     const csv = generarCSV(listaFiltrada);
@@ -165,6 +171,17 @@ export default function GastosScreen() {
         <Card style={styles.formCard}>
           <TextInput style={styles.input} placeholder="¿Qué fue el gasto?" placeholderTextColor={colors.textMuted} value={item} onChangeText={setItem} />
           <TextInput style={styles.input} placeholder="Valor (ej. 45000)" placeholderTextColor={colors.textMuted} value={valor} onChangeText={setValor} keyboardType="numeric" />
+
+          <View style={styles.chipsRow}>
+            {Object.keys(tasas).map((m) => (
+              <TouchableOpacity key={m} style={[styles.chip, moneda === m && styles.chipActivo]} onPress={() => setMoneda(m)}>
+                <Text style={[styles.chipText, moneda === m && styles.chipTextActivo]}>{m}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {moneda !== "COP" && valor && (
+            <Text style={styles.conversionTexto}>≈ ${convertirACOP(parseFloat(valor.replace(/[^0-9.]/g, "")) || 0, moneda).toLocaleString("es-CO")} COP</Text>
+          )}
 
           <TouchableOpacity style={styles.fechaBoton} onPress={() => setMostrarFecha(true)}>
             <Ionicons name="calendar-outline" size={16} color={colors.primary} />
@@ -248,7 +265,10 @@ export default function GastosScreen() {
                     <Image source={{ uri: g.comprobante_url }} style={styles.miniatura} />
                   </TouchableOpacity>
                 )}
-                <Text style={styles.valor}>${Number(g.valor).toLocaleString("es-CO")}</Text>
+                <Text style={styles.valor}>
+                  ${Number(g.valor).toLocaleString("es-CO")} {g.moneda !== "COP" ? g.moneda : ""}
+                </Text>
+                {g.moneda !== "COP" && <Text style={styles.conversionMini}>${Number(g.valor_cop ?? g.valor).toLocaleString("es-CO")} COP</Text>}
                 {verPapelera && (
                   <TouchableOpacity onPress={() => restaurarGasto(g.id)} style={styles.restaurarBoton}>
                     <Ionicons name="arrow-undo" size={16} color={colors.primary} />
@@ -303,6 +323,8 @@ const styles = StyleSheet.create({
   chipsRowFiltro: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
   restaurarBoton: { marginLeft: spacing.sm, padding: 6 },
   historialTexto: { fontSize: 11, color: colors.danger, marginTop: 2, fontStyle: "italic" },
+  conversionTexto: { fontSize: 12, color: colors.textMuted, marginBottom: spacing.sm, marginTop: -4 },
+  conversionMini: { fontSize: 10, color: colors.textMuted, textAlign: "right" },
   empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
   errorText: { color: colors.danger, padding: spacing.lg },
 });

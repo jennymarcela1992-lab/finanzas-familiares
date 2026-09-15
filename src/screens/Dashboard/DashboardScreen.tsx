@@ -1,10 +1,16 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert, Modal } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert, Modal, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import { useCierreMensual } from "../../hooks/useCierreMensual";
 import { useAhorros } from "../../hooks/useAhorros";
 import { useAuth } from "../../hooks/useAuth";
 import { useResumenGastos } from "../../hooks/useResumenGastos";
+import { useDeudas } from "../../hooks/useDeudas";
+import { usePropiedades } from "../../hooks/usePropiedades";
+import { useVehiculos } from "../../hooks/useVehiculos";
+import { generarBackupJSON } from "../../utils/backup";
 import Card from "../../components/Card";
 import BarChart from "../../components/BarChart";
 import PrimaryButton from "../../components/PrimaryButton";
@@ -15,6 +21,65 @@ export default function DashboardScreen() {
   const { metas } = useAhorros();
   const { usuario } = useAuth();
   const { porRubro, porPersona } = useResumenGastos();
+  const { deudas } = useDeudas();
+  const { propiedades } = usePropiedades();
+  const { vehiculos } = useVehiculos();
+  const [exportando, setExportando] = useState(false);
+
+  function diasHasta(fecha: string) {
+    return Math.ceil((new Date(fecha).getTime() - Date.now()) / 86400000);
+  }
+  function mesActualStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  const alertas: { texto: string; icono: keyof typeof Ionicons.glyphMap }[] = [];
+  deudas.forEach((d) => {
+    if (d.proximaCuota && diasHasta(d.proximaCuota.fecha_vencimiento) <= d.dias_aviso_previo) {
+      alertas.push({
+        icono: "card",
+        texto: `"${d.nombre}": cuota de $${Number(d.proximaCuota.cuota_total).toLocaleString("es-CO")} vence en ${diasHasta(d.proximaCuota.fecha_vencimiento)} día(s)${d.entidad_pago ? ` · ${d.entidad_pago}` : ""}`,
+      });
+    }
+  });
+  propiedades.forEach((p) => {
+    const yaRecibido = p.arriendos.some((a) => a.mes === mesActualStr());
+    if (!yaRecibido) alertas.push({ icono: "business", texto: `Arriendo de "${p.nombre}" no registrado este mes` });
+  });
+  vehiculos.forEach((v) => {
+    if (v.diasEnMora > 0) alertas.push({ icono: "car", texto: `"${v.nombre}": ${v.diasEnMora} día(s) en mora este mes` });
+  });
+
+  async function manejarExportarBackup() {
+    setExportando(true);
+    try {
+      const json = await generarBackupJSON();
+      const nombreArchivo = `backup_finanzas_${new Date().toISOString().slice(0, 10)}.json`;
+
+      if (Platform.OS === "web") {
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const enlace = document.createElement("a");
+        enlace.href = url;
+        enlace.download = nombreArchivo;
+        document.body.appendChild(enlace);
+        enlace.click();
+        document.body.removeChild(enlace);
+        URL.revokeObjectURL(url);
+      } else {
+        const ruta = FileSystem.documentDirectory + nombreArchivo;
+        await FileSystem.writeAsStringAsync(ruta, json, { encoding: FileSystem.EncodingType.UTF8 });
+        const disponible = await Sharing.isAvailableAsync();
+        if (disponible) await Sharing.shareAsync(ruta, { mimeType: "application/json", dialogTitle: "Backup completo" });
+        else Alert.alert("Backup guardado", `Se guardó en: ${ruta}`);
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e.message ?? "No se pudo generar el backup.");
+    } finally {
+      setExportando(false);
+    }
+  }
 
   const [editandoAporte, setEditandoAporte] = useState<string | null>(null);
   const [nuevoAporte, setNuevoAporte] = useState("");
@@ -127,6 +192,20 @@ export default function DashboardScreen() {
         </Card>
       ))}
 
+      {alertas.length > 0 && (
+        <Card>
+          <Text style={typography.h3}>Alertas</Text>
+          <View style={{ marginTop: spacing.sm }}>
+            {alertas.map((a, i) => (
+              <View key={i} style={styles.alertaFila}>
+                <Ionicons name={a.icono} size={15} color={colors.warning} />
+                <Text style={styles.alertaTexto}>{a.texto}</Text>
+              </View>
+            ))}
+          </View>
+        </Card>
+      )}
+
       <Card>
         <Text style={typography.h3}>Gastos por rubro este mes</Text>
         <View style={{ marginTop: spacing.md }}>
@@ -169,6 +248,17 @@ export default function DashboardScreen() {
           />
         )}
       </Card>
+
+      <TouchableOpacity onPress={manejarExportarBackup} style={styles.backupBoton} disabled={exportando}>
+        {exportando ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : (
+          <>
+            <Ionicons name="cloud-download-outline" size={16} color={colors.primary} />
+            <Text style={styles.backupTexto}>Exportar todos mis datos (backup)</Text>
+          </>
+        )}
+      </TouchableOpacity>
 
       <Modal visible={mostrarEnviarExcedente} transparent animationType="slide">
         <View style={styles.modalFondo}>
@@ -230,4 +320,8 @@ const styles = StyleSheet.create({
   chipText: { color: colors.primary, fontSize: 12, fontWeight: "600" },
   chipTextActivo: { color: colors.white },
   input: { backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.md, fontSize: 15 },
+  alertaFila: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: spacing.sm },
+  alertaTexto: { fontSize: 12, color: colors.textSecondary, flex: 1, lineHeight: 17 },
+  backupBoton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingVertical: 12, marginBottom: spacing.xl },
+  backupTexto: { fontSize: 13, color: colors.primary, fontWeight: "600" },
 });
