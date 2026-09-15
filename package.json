@@ -22,7 +22,14 @@
     "@supabase/supabase-js": "^2.45.4",
     "@opentelemetry/api": "*",
     "react-native-url-polyfill": "^2.0.0",
-    "@react-native-async-storage/async-storage": "2.2.0"
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/datetimepicker": "*",
+    "expo-image-picker": "*",
+    "expo-file-system": "*",
+    "expo-sharing": "*",
+    "expo-local-authentication": "*",
+    "react-dom": "*",
+    "@expo/metro-runtime": "*"
   },
   "devDependencies": {
     "typescript": "^5.4.5",
