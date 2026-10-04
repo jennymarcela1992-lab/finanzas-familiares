@@ -45,6 +45,7 @@ export function useCierreMensual(mes: string = mesActual()) {
       .from("gastos")
       .select("*")
       .eq("es_compartido", true)
+      .or("borrado.is.null,borrado.eq.false")
       .gte("fecha", inicioMes)
       .lte("fecha", finMes);
     if (errG) {
