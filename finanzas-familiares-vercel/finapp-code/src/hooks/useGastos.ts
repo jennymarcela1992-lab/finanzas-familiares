@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Platform } from "react-native";
 import { supabase } from "../config/supabase";
 
 export interface GastoRow {
@@ -15,7 +16,8 @@ export interface GastoRow {
   metodo_pago: string | null;
   nota: string | null;
   es_recurrente: boolean;
-  comprobante_url: string | null;
+  comprobante_url: string | null; // ruta interna de la foto en el bucket privado
+  comprobante_ver?: string | null; // enlace temporal para mostrarla
   borrado: boolean;
   borrado_por: string | null;
   restaurado_por: string | null;
@@ -37,19 +39,78 @@ export interface NuevoGasto {
   valorCop?: number; // ya convertido a pesos, calculado con la tasa de cambio
 }
 
-async function subirComprobante(uriLocal: string): Promise<string | null> {
+const BUCKET = "comprobantes";
+
+const EXTENSIONES: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif",
+};
+
+// En el navegador reduce la foto (max 1600 px, JPG) para que suba rapido y ocupe poco.
+async function reducirEnWeb(blob: Blob): Promise<Blob> {
+  if (Platform.OS !== "web" || typeof document === "undefined") return blob;
+  try {
+    const url = URL.createObjectURL(blob);
+    const img: HTMLImageElement = await new Promise((ok, falla) => {
+      const i = new (window as any).Image();
+      i.onload = () => ok(i);
+      i.onerror = falla;
+      i.src = url;
+    });
+    const MAX = 1600;
+    const escala = Math.min(1, MAX / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * escala);
+    canvas.height = Math.round(img.height * escala);
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    const reducido: Blob | null = await new Promise((ok) => canvas.toBlob(ok, "image/jpeg", 0.75));
+    return reducido && reducido.size < blob.size ? reducido : blob;
+  } catch {
+    return blob; // si el navegador no puede leerla (p. ej. HEIC), se sube tal cual
+  }
+}
+
+// Sube la foto al bucket privado y devuelve la ruta interna (no un enlace publico).
+async function subirComprobante(uriLocal: string, usuarioId: string): Promise<string> {
   const respuesta = await fetch(uriLocal);
-  const blob = await respuesta.blob();
-  const extension = uriLocal.split(".").pop()?.split("?")[0] || "jpg";
-  const nombreArchivo = `${Date.now()}.${extension}`;
+  const original = await respuesta.blob();
+  const blob = await reducirEnWeb(original);
+  const tipo = blob.type || "image/jpeg";
+  const extension = EXTENSIONES[tipo] ?? "jpg";
+  const ruta = `${usuarioId}/${Date.now()}.${extension}`;
 
-  const { error: errSubida } = await supabase.storage.from("comprobantes").upload(nombreArchivo, blob, {
-    contentType: blob.type || "image/jpeg",
+  const { error } = await supabase.storage.from(BUCKET).upload(ruta, blob, { contentType: tipo });
+  if (error) throw new Error(`No se pudo subir la foto: ${error.message}`);
+  return ruta;
+}
+
+// Acepta la ruta interna o un enlace publico viejo y devuelve la ruta dentro del bucket.
+function rutaDeComprobante(valor: string): string {
+  const marca = `/${BUCKET}/`;
+  if (valor.startsWith("http")) {
+    const i = valor.indexOf(marca);
+    return i >= 0 ? decodeURIComponent(valor.slice(i + marca.length).split("?")[0]) : valor;
+  }
+  return valor;
+}
+
+// Genera enlaces temporales (1 hora) para ver las fotos privadas.
+async function agregarEnlacesDeFotos(filas: GastoRow[]): Promise<GastoRow[]> {
+  const rutas = filas.filter((g) => g.comprobante_url).map((g) => rutaDeComprobante(g.comprobante_url!));
+  if (rutas.length === 0) return filas;
+  const { data } = await supabase.storage.from(BUCKET).createSignedUrls(rutas, 60 * 60);
+  const enlaces = new Map<string, string>();
+  (data ?? []).forEach((d) => {
+    if (d.path && d.signedUrl) enlaces.set(d.path, d.signedUrl);
   });
-  if (errSubida) throw errSubida;
-
-  const { data } = supabase.storage.from("comprobantes").getPublicUrl(nombreArchivo);
-  return data.publicUrl;
+  return filas.map((g) =>
+    g.comprobante_url ? { ...g, comprobante_ver: enlaces.get(rutaDeComprobante(g.comprobante_url)) ?? null } : g
+  );
 }
 
 export function useGastos() {
@@ -64,7 +125,7 @@ export function useGastos() {
     if (err) {
       setError(err.message);
     } else {
-      const todos = data as GastoRow[];
+      const todos = await agregarEnlacesDeFotos(data as GastoRow[]);
       setGastos(todos.filter((g) => !g.borrado));
       setPapelera(todos.filter((g) => g.borrado));
       setError(null);
@@ -80,9 +141,11 @@ export function useGastos() {
     const { data: sesion } = await supabase.auth.getUser();
     const usuario = sesion.user;
 
+    if (!usuario) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión.");
+
     let comprobanteUrl: string | null = null;
     if (nuevo.comprobanteUri) {
-      comprobanteUrl = await subirComprobante(nuevo.comprobanteUri);
+      comprobanteUrl = await subirComprobante(nuevo.comprobanteUri, usuario.id);
     }
 
     const { error: err } = await supabase.from("gastos").insert({
@@ -101,7 +164,10 @@ export function useGastos() {
       es_recurrente: nuevo.esRecurrente ?? false,
       comprobante_url: comprobanteUrl,
     });
-    if (err) throw err;
+    if (err) {
+      if (comprobanteUrl) await supabase.storage.from(BUCKET).remove([comprobanteUrl]);
+      throw err;
+    }
     await cargarGastos();
   }
 
@@ -128,8 +194,12 @@ export function useGastos() {
   }
 
   async function borrarGasto(id: string) {
+    const fila = [...gastos, ...papelera].find((g) => g.id === id);
     const { error: err } = await supabase.from("gastos").delete().eq("id", id);
     if (err) throw err;
+    if (fila?.comprobante_url) {
+      await supabase.storage.from(BUCKET).remove([rutaDeComprobante(fila.comprobante_url)]);
+    }
     await cargarGastos();
   }
 

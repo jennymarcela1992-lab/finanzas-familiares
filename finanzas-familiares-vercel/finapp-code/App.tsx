@@ -1,4 +1,5 @@
 import "react-native-url-polyfill/auto";
+import "./src/utils/alertaWeb";
 import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";

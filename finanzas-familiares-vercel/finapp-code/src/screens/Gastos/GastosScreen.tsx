@@ -41,18 +41,29 @@ export default function GastosScreen() {
   const [guardando, setGuardando] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
 
-  async function elegirFoto() {
-    const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permiso.granted) {
-      Alert.alert("Permiso necesario", "Activa el acceso a fotos para adjuntar un comprobante.");
-      return;
-    }
-    const resultado = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.5,
-    });
-    if (!resultado.canceled && resultado.assets?.[0]) {
-      setComprobanteUri(resultado.assets[0].uri);
+  async function elegirFoto(origen: "camara" | "galeria") {
+    const opciones = { mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.6 };
+    try {
+      if (origen === "camara") {
+        const permiso = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permiso.granted) {
+          Alert.alert("Permiso necesario", "Activa el acceso a la cámara para tomar la foto del comprobante.");
+          return;
+        }
+      } else {
+        const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permiso.granted) {
+          Alert.alert("Permiso necesario", "Activa el acceso a fotos para adjuntar un comprobante.");
+          return;
+        }
+      }
+      const resultado =
+        origen === "camara" ? await ImagePicker.launchCameraAsync(opciones) : await ImagePicker.launchImageLibraryAsync(opciones);
+      if (!resultado.canceled && resultado.assets?.[0]) {
+        setComprobanteUri(resultado.assets[0].uri);
+      }
+    } catch (e: any) {
+      Alert.alert("No se pudo abrir", e?.message ?? "Intenta de nuevo.");
     }
   }
 
@@ -226,10 +237,16 @@ export default function GastosScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity onPress={elegirFoto} style={styles.fotoBoton}>
-              <Ionicons name="camera" size={16} color={colors.primary} />
-              <Text style={styles.fotoBotonTexto}>Adjuntar foto del comprobante</Text>
-            </TouchableOpacity>
+            <View style={styles.fotoFila}>
+              <TouchableOpacity onPress={() => elegirFoto("camara")} style={[styles.fotoBoton, { flex: 1 }]}>
+                <Ionicons name="camera" size={16} color={colors.primary} />
+                <Text style={styles.fotoBotonTexto}>Tomar foto</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => elegirFoto("galeria")} style={[styles.fotoBoton, { flex: 1 }]}>
+                <Ionicons name="images" size={16} color={colors.primary} />
+                <Text style={styles.fotoBotonTexto}>Elegir de galería</Text>
+              </TouchableOpacity>
+            </View>
           )}
 
           <PrimaryButton title="Guardar gasto" onPress={manejarGuardar} loading={guardando} style={{ marginTop: spacing.sm }} />
@@ -260,11 +277,15 @@ export default function GastosScreen() {
                   {g.nota && <Text style={styles.nota}>{g.nota}</Text>}
                   {verPapelera && g.borrado_por && <Text style={styles.historialTexto}>Borrado por {g.borrado_por}</Text>}
                 </View>
-                {g.comprobante_url && (
-                  <TouchableOpacity onPress={() => setFotoAmpliada(g.comprobante_url)}>
-                    <Image source={{ uri: g.comprobante_url }} style={styles.miniatura} />
+                {g.comprobante_ver ? (
+                  <TouchableOpacity onPress={() => setFotoAmpliada(g.comprobante_ver ?? null)}>
+                    <Image source={{ uri: g.comprobante_ver }} style={styles.miniatura} />
                   </TouchableOpacity>
-                )}
+                ) : g.comprobante_url ? (
+                  <View style={[styles.miniatura, styles.miniaturaVacia]}>
+                    <Ionicons name="image-outline" size={18} color={colors.textMuted} />
+                  </View>
+                ) : null}
                 <Text style={styles.valor}>
                   ${Number(g.valor).toLocaleString("es-CO")} {g.moneda !== "COP" ? g.moneda : ""}
                 </Text>
@@ -306,6 +327,8 @@ const styles = StyleSheet.create({
   iconoRubro: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
   nota: { fontSize: 12, color: colors.textMuted, marginTop: 2, fontStyle: "italic" },
   valor: { fontSize: 15, fontWeight: "800", color: colors.primary },
+  fotoFila: { flexDirection: "row", gap: 8 },
+  miniaturaVacia: { backgroundColor: colors.background, alignItems: "center", justifyContent: "center" },
   fotoBoton: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm },
   fotoBotonTexto: { fontSize: 13, color: colors.primary, fontWeight: "600" },
   previewFila: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
