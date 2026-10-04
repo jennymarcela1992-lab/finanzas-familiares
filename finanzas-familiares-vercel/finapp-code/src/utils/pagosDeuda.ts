@@ -3,7 +3,7 @@
 // (cuotas que ya estaban pagadas cuando se creó el crédito en la app).
 import { supabase } from "../config/supabase";
 
-export type OrigenPago = "persona" | "arriendo" | "registro_inicial";
+export type OrigenPago = "persona" | "arriendo" | "registro_inicial" | "prestamo";
 
 export interface PagoDeudaRow {
   id: string;
@@ -103,6 +103,7 @@ export async function registrarPagoDeuda(p: {
   pagadoPor: string;
   gastoId?: string | null;
   arriendoId?: string | null;
+  abonoPrestamoId?: string | null;
 }) {
   if (!(p.valor > 0)) throw new Error("El valor del pago debe ser mayor que cero.");
   const yo = await nombreUsuarioActual();
@@ -116,6 +117,7 @@ export async function registrarPagoDeuda(p: {
       pagado_por: p.pagadoPor,
       gasto_id: p.gastoId ?? null,
       arriendo_id: p.arriendoId ?? null,
+      ...(p.abonoPrestamoId ? { abono_prestamo_id: p.abonoPrestamoId } : {}),
       registrado_por: yo.nombre,
     })
     .select()

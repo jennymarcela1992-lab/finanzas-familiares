@@ -7,6 +7,7 @@ import * as Sharing from "expo-sharing";
 import { useGastos, GastoRow } from "../../hooks/useGastos";
 import { useTasasCambio } from "../../hooks/useTasasCambio";
 import { useDeudas } from "../../hooks/useDeudas";
+import { useActivos, Activo } from "../../hooks/useActivos";
 import { formatoFecha, pesos, hoyISO } from "../../utils/amortizacion";
 import FechaInput from "../../components/FechaInput";
 import ScreenHeader from "../../components/ScreenHeader";
@@ -15,7 +16,7 @@ import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
 
-const RUBROS = ["Mercado", "Servicios", "Salidas y Eventos", "Salud", "Gastos Fijos", "Créditos", "Otro"];
+const RUBROS = ["Mercado", "Servicios", "Salidas y Eventos", "Salud", "Gastos Fijos", "Créditos", "Vehículo", "Propiedades", "Otro"];
 const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
   Mercado: "cart",
   Servicios: "flash",
@@ -23,6 +24,8 @@ const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
   Salud: "medkit",
   "Gastos Fijos": "home",
   Créditos: "card",
+  Vehículo: "car",
+  Propiedades: "business",
   Otro: "ellipsis-horizontal",
 };
 
@@ -30,6 +33,8 @@ export default function GastosScreen() {
   const { gastos, papelera, cargando, error, agregarGasto, editarGasto, moverAPapelera, restaurarGasto, borrarGasto, generarCSV } = useGastos();
   const { tasas, convertirACOP } = useTasasCambio();
   const { deudas, recargar: recargarDeudas } = useDeudas();
+  const { activos } = useActivos();
+  const [asociado, setAsociado] = useState<Activo | null>(null); // propiedad o carro al que pertenece el gasto
   const [esPagoCredito, setEsPagoCredito] = useState(false);
   const [deudaElegida, setDeudaElegida] = useState<string | null>(null);
   const deudasConCuotas = deudas.filter((d) => d.proximaCuota);
@@ -75,6 +80,7 @@ export default function GastosScreen() {
     setEsPagoCredito(false);
     setDeudaElegida(null);
     setEditando(null);
+    setAsociado(null);
   }
 
   function abrirNuevo() {
@@ -97,6 +103,7 @@ export default function GastosScreen() {
     setEsCompartido(!!g.es_compartido);
     setNota(g.nota ?? "");
     setFotoActual(g.comprobante_ver ?? null);
+    setAsociado(activos.find((a) => a.id === g.propiedad_id || a.id === g.vehiculo_id) ?? null);
     setMostrarForm(true);
   }
 
@@ -148,6 +155,8 @@ export default function GastosScreen() {
         deudaId: esPagoCredito && deudaElegida ? deudaElegida : undefined,
         moneda,
         valorCop: convertirACOP(aNumero(valor), moneda),
+        propiedadId: asociado?.tipo === "propiedad" ? asociado.id : null,
+        vehiculoId: asociado?.tipo === "vehiculo" ? asociado.id : null,
       };
       if (editando) {
         await editarGasto(editando.id, { ...datos, quitarFoto: !fotoActual && !comprobanteUri && !!editando.comprobante_url });
@@ -320,6 +329,23 @@ export default function GastosScreen() {
             ))}
           </View>
 
+          {activos.length > 0 && (
+            <>
+              <Text style={styles.label}>¿Es de una propiedad o del carro? (para su rendimiento)</Text>
+              <View style={styles.chipsRow}>
+                <TouchableOpacity style={[styles.chip, !asociado && styles.chipActivo]} onPress={() => setAsociado(null)}>
+                  <Text style={[styles.chipText, !asociado && styles.chipTextActivo]}>No</Text>
+                </TouchableOpacity>
+                {activos.map((a) => (
+                  <TouchableOpacity key={a.id} style={[styles.chip, asociado?.id === a.id && styles.chipActivo]} onPress={() => setAsociado(a)}>
+                    <Ionicons name={a.tipo === "propiedad" ? "business" : "car"} size={13} color={asociado?.id === a.id ? colors.white : colors.primary} />
+                    <Text style={[styles.chipText, asociado?.id === a.id && styles.chipTextActivo]}>{a.nombre}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
           <View style={styles.switchRow}>
             <Text style={typography.body}>¿Se divide entre los dos?</Text>
             <Switch value={esCompartido} onValueChange={setEsCompartido} trackColor={{ true: colors.primary }} />
@@ -427,6 +453,11 @@ export default function GastosScreen() {
                   {g.deuda_id && (
                     <Text style={styles.creditoBadge}>
                       Pago de crédito{deudas.find((d) => d.id === g.deuda_id) ? `: ${deudas.find((d) => d.id === g.deuda_id)!.nombre}` : ""}
+                    </Text>
+                  )}
+                  {(g.propiedad_id || g.vehiculo_id) && (
+                    <Text style={styles.creditoBadge}>
+                      {g.propiedad_id ? "Propiedad" : "Carro"}: {activos.find((a) => a.id === (g.propiedad_id || g.vehiculo_id))?.nombre ?? ""}
                     </Text>
                   )}
                   {g.nota && <Text style={styles.nota}>{g.nota}</Text>}

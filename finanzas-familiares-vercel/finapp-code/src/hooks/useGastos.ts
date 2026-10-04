@@ -20,6 +20,8 @@ export interface GastoRow {
   comprobante_url: string | null; // ruta interna de la foto en el bucket privado
   comprobante_ver?: string | null; // enlace temporal para mostrarla
   deuda_id?: string | null; // si es pago de un crédito
+  propiedad_id?: string | null; // gasto de una propiedad (para su rendimiento)
+  vehiculo_id?: string | null; // gasto del carro (para su rentabilidad)
   borrado: boolean;
   borrado_por: string | null;
   restaurado_por: string | null;
@@ -40,6 +42,8 @@ export interface NuevoGasto {
   moneda?: string; // COP por defecto
   valorCop?: number; // ya convertido a pesos, calculado con la tasa de cambio
   deudaId?: string; // si el gasto es el pago de un crédito
+  propiedadId?: string | null;
+  vehiculoId?: string | null;
 }
 
 const BUCKET = "comprobantes";
@@ -168,6 +172,8 @@ export function useGastos() {
       es_recurrente: nuevo.esRecurrente ?? false,
       comprobante_url: comprobanteUrl,
       ...(nuevo.deudaId ? { deuda_id: nuevo.deudaId } : {}),
+      ...(nuevo.propiedadId ? { propiedad_id: nuevo.propiedadId } : {}),
+      ...(nuevo.vehiculoId ? { vehiculo_id: nuevo.vehiculoId } : {}),
     }).select().single();
     if (err) {
       if (comprobanteUrl) await supabase.storage.from(BUCKET).remove([comprobanteUrl]);
@@ -224,6 +230,8 @@ export function useGastos() {
         es_compartido: cambios.esCompartido,
         nota: cambios.nota ?? null,
         comprobante_url: comprobanteUrl,
+        ...(cambios.propiedadId !== undefined ? { propiedad_id: cambios.propiedadId } : {}),
+        ...(cambios.vehiculoId !== undefined ? { vehiculo_id: cambios.vehiculoId } : {}),
       })
       .eq("id", id);
     if (err) throw err;

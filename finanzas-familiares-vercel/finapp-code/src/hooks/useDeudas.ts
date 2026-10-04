@@ -56,6 +56,8 @@ export interface DeudaRow {
   numero_cuenta: string | null;
   alias_pago: string | null;
   dias_aviso_previo: number;
+  propiedad_id: string | null; // crédito asociado a una propiedad
+  vehiculo_id: string | null; // crédito asociado al carro
   abono_mensual: number | null; // abono fijo extra a capital cada mes
   abono_mensual_desde: string | null;
 }
@@ -88,6 +90,8 @@ export interface DatosDeuda {
   numeroCuenta?: string;
   aliasPago?: string;
   diasAvisoPrevio?: number;
+  propiedadId?: string | null;
+  vehiculoId?: string | null;
 }
 
 async function nombreUsuario(): Promise<string> {
@@ -253,6 +257,8 @@ export function useDeudas() {
       entidad_pago: datos.entidadPago ?? null,
       numero_cuenta: datos.numeroCuenta ?? null,
       alias_pago: datos.aliasPago ?? null,
+      propiedad_id: datos.propiedadId ?? null,
+      vehiculo_id: datos.vehiculoId ?? null,
     };
   }
 

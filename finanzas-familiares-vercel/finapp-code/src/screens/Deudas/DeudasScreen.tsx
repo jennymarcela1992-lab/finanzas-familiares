@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Activity
 import { Ionicons } from "@expo/vector-icons";
 import { useDeudas, DeudaConCuotas, CuotaRow, AbonoRow, DatosDeuda } from "../../hooks/useDeudas";
 import { usePersonas } from "../../hooks/usePersonas";
+import { useActivos } from "../../hooks/useActivos";
 import { PagoDeudaRow } from "../../utils/pagosDeuda";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
@@ -35,6 +36,7 @@ const FORM_VACIO = {
   entidad: "",
   cuenta: "",
   alias: "",
+  activo: "" as string, // id de la propiedad o vehículo asociado
 };
 
 export default function DeudasScreen() {
@@ -74,6 +76,7 @@ export default function DeudasScreen() {
     setYaPagadasEn(panel === "yaPagadas" && yaPagadasEn !== id ? id : null);
   };
   const { personas, yo } = usePersonas();
+  const { activos } = useActivos();
 
   const cambiar = (campo: keyof typeof FORM_VACIO) => (v: string) => setForm((f) => ({ ...f, [campo]: v }));
 
@@ -113,6 +116,7 @@ export default function DeudasScreen() {
       entidad: d.entidad_pago ?? "",
       cuenta: d.numero_cuenta ?? "",
       alias: d.alias_pago ?? "",
+      activo: d.propiedad_id ?? d.vehiculo_id ?? "",
     });
     setEditandoId(d.id);
     setMostrarForm(true);
@@ -141,6 +145,8 @@ export default function DeudasScreen() {
       entidadPago: form.entidad.trim() || undefined,
       numeroCuenta: form.cuenta.trim() || undefined,
       aliasPago: form.alias.trim() || undefined,
+      propiedadId: activos.find((a) => a.id === form.activo && a.tipo === "propiedad")?.id ?? null,
+      vehiculoId: activos.find((a) => a.id === form.activo && a.tipo === "vehiculo")?.id ?? null,
     };
     setGuardando(true);
     try {
@@ -257,6 +263,25 @@ export default function DeudasScreen() {
 
           {editandoId && <Text style={styles.ayuda}>Al guardar, se recalculan las cuotas pendientes. Las cuotas ya pagadas no cambian.</Text>}
 
+          {activos.length > 0 && (
+            <>
+              <Text style={[styles.label, { marginTop: spacing.sm }]}>¿Está asociado a una propiedad o al carro?</Text>
+              <View style={styles.chips}>
+                <TouchableOpacity onPress={() => setForm((f) => ({ ...f, activo: "" }))} style={[styles.chip, !form.activo && styles.chipActivo]}>
+                  <Text style={[styles.chipTexto, !form.activo && styles.chipTextoActivo]}>No</Text>
+                </TouchableOpacity>
+                {activos.map((a) => (
+                  <TouchableOpacity key={a.id} onPress={() => setForm((f) => ({ ...f, activo: a.id }))} style={[styles.chip, form.activo === a.id && styles.chipActivo]}>
+                    <Text style={[styles.chipTexto, form.activo === a.id && styles.chipTextoActivo]}>
+                      {a.nombre} ({a.tipo === "propiedad" ? "propiedad" : "carro"})
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.ayuda}>Las cuotas se restan del rendimiento de esa propiedad o del carro, y el arriendo puede pagarlas directamente.</Text>
+            </>
+          )}
+
           <Text style={[styles.label, { marginTop: spacing.sm }]}>Dónde se paga (opcional)</Text>
           <TextInput style={styles.input} placeholder="Entidad (ej. Bancolombia)" placeholderTextColor={colors.textMuted} value={form.entidad} onChangeText={cambiar("entidad")} />
           <TextInput style={styles.input} placeholder="Número de crédito / referencia" placeholderTextColor={colors.textMuted} value={form.cuenta} onChangeText={cambiar("cuenta")} />
@@ -290,7 +315,14 @@ export default function DeudasScreen() {
               <View style={styles.iconoCircle}>
                 <Ionicons name={terminada ? "checkmark-done" : "card"} size={17} color={colors.primary} />
               </View>
-              <Text style={[typography.h3, { flexShrink: 1 }]}>{d.nombre}</Text>
+              <View style={{ flexShrink: 1 }}>
+                <Text style={typography.h3}>{d.nombre}</Text>
+                {(d.propiedad_id || d.vehiculo_id) && (
+                  <Text style={typography.caption}>
+                    {d.propiedad_id ? "Propiedad" : "Carro"}: {activos.find((a) => a.id === (d.propiedad_id || d.vehiculo_id))?.nombre ?? ""}
+                  </Text>
+                )}
+              </View>
             </View>
             <Text style={styles.pctText}>{Math.round(d.porcentajePagado * 100)}%</Text>
           </View>

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
 import { hoyISO, sumarMeses } from "../utils/amortizacion";
 import { personasDelHogar, aportesDelMes, esDelHogar, AportePersona } from "../utils/aportes";
+import { arriendoVigente, fechaPagoArriendo } from "../utils/arriendo";
 
 export interface MesBalance {
   mes: string; // AAAA-MM
@@ -94,7 +95,7 @@ export function useDashboard(mes: string) {
       supabase.from("abonos_deuda").select("deuda_id, valor, fecha"),
       supabase.from("metas_ahorro").select("id, nombre, monto_objetivo"),
       supabase.from("aportes_ahorro").select("meta_id, monto"),
-      supabase.from("propiedades").select("id, nombre, valor_arriendo"),
+      supabase.from("propiedades").select("*"),
       supabase.from("pagos_deuda").select("fecha, valor, origen, gasto_id").gte("fecha", desde).lt("fecha", hasta),
     ]);
 
@@ -245,10 +246,26 @@ export function useDashboard(mes: string) {
     });
 
     const mesActual = hoy.slice(0, 7);
-    const { data: arriendosHoy } = await supabase.from("arriendos_recibidos").select("propiedad_id").eq("mes", mesActual);
-    const yaRecibidos = new Set((arriendosHoy ?? []).map((a: any) => a.propiedad_id));
+    // Arriendos por cobrar: valor vigente (con IPC) y fecha de pago pactada
+    const [{ data: arriendosHoy }, { data: ipcData }] = await Promise.all([
+      supabase.from("arriendos_recibidos").select("propiedad_id, monto").eq("mes", mesActual),
+      supabase.from("ipc_anual").select("*"),
+    ]);
+    const ipc: Record<number, number> = {};
+    (ipcData ?? []).forEach((r: any) => (ipc[Number(r.anio)] = Number(r.variacion)));
     (rProp.error ? [] : rProp.data ?? []).forEach((p: any) => {
-      if (!yaRecibidos.has(p.id)) proximos.push({ tipo: "arriendo", titulo: p.nombre, detalle: "Arriendo por cobrar este mes", valor: Number(p.valor_arriendo), fecha: null, vencido: false });
+      const vigente = arriendoVigente(p, ipc, hoy).valor;
+      const recibido = (arriendosHoy ?? []).filter((a: any) => a.propiedad_id === p.id).reduce((s: number, a: any) => s + Number(a.monto), 0);
+      if (recibido >= vigente - 1) return;
+      const fechaPago = fechaPagoArriendo(mesActual, p.dia_pago_arriendo);
+      proximos.push({
+        tipo: "arriendo",
+        titulo: p.nombre,
+        detalle: recibido > 0 ? `Arriendo por cobrar (recibido ${Math.round(recibido).toLocaleString("es-CO")})` : "Arriendo por cobrar",
+        valor: vigente - recibido,
+        fecha: fechaPago,
+        vencido: fechaPago < hoy,
+      });
     });
 
     proximos.sort((a, b) => Number(b.vencido) - Number(a.vencido) || (a.fecha ?? "9999").localeCompare(b.fecha ?? "9999"));
