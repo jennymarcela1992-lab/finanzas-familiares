@@ -11,6 +11,7 @@ export interface MesBalance {
   vehiculo: number;
   inversiones: number; // ingresos de inversiones en conjunto
   prestamosCobrados: number; // abonos que pagan terceros a quienes les prestamos (o préstamos que nos hacen)
+  desembolsos: number; // aumentos de créditos: dinero recibido del prestamista
   gastos: number;
   cuotas: number; // pagos de créditos registrados en el mes (cuotas + abonos extra)
   otrasSalidas: number; // egresos de inversiones + préstamos entregados a terceros + abonos a préstamos de terceros
@@ -81,12 +82,14 @@ export function useDashboard(mes: string) {
       supabase.from("abonos_prestamo").select("prestamo_id, monto, fecha").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("movimientos_inversion").select("tipo, monto, fecha").gte("fecha", desde).lt("fecha", hasta),
     ]);
+    const rDes = await supabase.from("desembolsos_deuda").select("deuda_id, valor, fecha");
+    const desembolsosTodos = (rDes.error ? [] : rDes.data ?? []) as any[];
     const [rG, rArr, rVeh, rPV, rCu, rDeu, rAb, rMet, rApo, rProp, rPag] = await Promise.all([
       supabase.from("gastos").select("id, fecha, valor, valor_cop, rubro, borrado, deuda_id").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("arriendos_recibidos").select("propiedad_id, mes, monto").gte("mes", meses[0]).lte("mes", mes),
       supabase.from("vehiculos").select("id, nombre, cuota_diaria"),
       supabase.from("pagos_vehiculo").select("vehiculo_id, fecha, estado, monto").gte("fecha", desde).lt("fecha", hasta),
-      supabase.from("cuotas_deuda").select("deuda_id, numero_cuota, cuota_total, valor_pagado, capital, fecha_vencimiento, estado"),
+      supabase.from("cuotas_deuda").select("deuda_id, numero_cuota, cuota_total, valor_pagado, capital, abono_extra, fecha_vencimiento, estado"),
       supabase.from("deudas").select("id, nombre, valor_inicial, entidad_pago"),
       supabase.from("abonos_deuda").select("deuda_id, valor, fecha"),
       supabase.from("metas_ahorro").select("id, nombre, monto_objetivo"),
@@ -104,7 +107,7 @@ export function useDashboard(mes: string) {
 
     // ---------- Balance por mes ----------
     const base = (m: string): MesBalance => ({
-      mes: m, ingresos: 0, aportes: 0, arriendos: 0, vehiculo: 0, inversiones: 0, prestamosCobrados: 0,
+      mes: m, ingresos: 0, aportes: 0, arriendos: 0, vehiculo: 0, inversiones: 0, prestamosCobrados: 0, desembolsos: 0,
       gastos: 0, cuotas: 0, otrasSalidas: 0, salidas: 0, balance: 0,
     });
     const porMes = new Map(meses.map((m) => [m, base(m)]));
@@ -177,8 +180,13 @@ export function useDashboard(mes: string) {
       if (b) b.cuotas += Number(a.valor);
     });
 
+    desembolsosTodos.forEach((x) => {
+      const b = porMes.get(mesDe(x.fecha));
+      if (b) b.desembolsos += Number(x.valor);
+    });
+
     porMes.forEach((b) => {
-      b.ingresos = b.aportes + b.arriendos + b.vehiculo + b.inversiones + b.prestamosCobrados;
+      b.ingresos = b.aportes + b.arriendos + b.vehiculo + b.inversiones + b.prestamosCobrados + b.desembolsos;
       b.salidas = b.gastos + b.cuotas + b.otrasSalidas;
       b.balance = b.ingresos - b.salidas;
     });
@@ -200,11 +208,14 @@ export function useDashboard(mes: string) {
     const deudasInfo = new Map((rDeu.data ?? []).map((d: any) => [d.id, d]));
     const capitalPagado = new Map<string, number>();
     (rCu.data ?? []).forEach((c: any) => {
-      if (c.estado === "pagada") capitalPagado.set(c.deuda_id, (capitalPagado.get(c.deuda_id) ?? 0) + Number(c.capital));
+      if (c.estado === "pagada") capitalPagado.set(c.deuda_id, (capitalPagado.get(c.deuda_id) ?? 0) + Number(c.capital) + Number(c.abono_extra ?? 0));
     });
     (rAb.error ? [] : rAb.data ?? []).forEach((a: any) => capitalPagado.set(a.deuda_id, (capitalPagado.get(a.deuda_id) ?? 0) + Number(a.valor)));
     const deudas: DeudaResumen[] = (rDeu.data ?? [])
-      .map((d: any) => ({ nombre: d.nombre, inicial: Number(d.valor_inicial), saldo: Math.max(0, Number(d.valor_inicial) - (capitalPagado.get(d.id) ?? 0)) }))
+      .map((d: any) => {
+        const inicial = Number(d.valor_inicial) + desembolsosTodos.filter((x) => x.deuda_id === d.id).reduce((s, x) => s + Number(x.valor), 0);
+        return { nombre: d.nombre, inicial, saldo: Math.max(0, inicial - (capitalPagado.get(d.id) ?? 0)) };
+      })
       .filter((d) => d.saldo > 0)
       .sort((a, b) => b.saldo - a.saldo);
 

@@ -217,6 +217,7 @@ export default function DashboardScreen() {
           {actual.vehiculo > 0 && <Desglose texto="Carro rentado" valor={actual.vehiculo} />}
           {actual.inversiones > 0 && <Desglose texto="Inversiones en conjunto" valor={actual.inversiones} />}
           {actual.prestamosCobrados > 0 && <Desglose texto="Préstamos (abonos recibidos)" valor={actual.prestamosCobrados} />}
+          {actual.desembolsos > 0 && <Desglose texto="Aumentos de créditos recibidos" valor={actual.desembolsos} />}
           <Desglose texto="Gastos registrados" valor={-actual.gastos} />
           {actual.cuotas > 0 && <Desglose texto="Pagos de créditos" valor={-actual.cuotas} />}
           {actual.otrasSalidas > 0 && <Desglose texto="Inversiones y préstamos entregados" valor={-actual.otrasSalidas} />}

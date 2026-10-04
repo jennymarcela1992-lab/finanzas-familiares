@@ -11,6 +11,7 @@ export interface CuotaRow {
   capital: number;
   interes: number;
   seguro: number | null;
+  abono_extra: number | null; // abono fijo mensual incluido en esta cuota
   saldo: number;
   fecha_vencimiento: string;
   estado: "pendiente" | "pagada";
@@ -25,6 +26,17 @@ export interface AbonoRow {
   fecha: string;
   valor: number;
   modalidad: "plazo" | "cuota";
+  nota: string | null;
+  registrado_por: string | null;
+}
+
+/** Aumento del préstamo (ej. el prestamista entrega más dinero). */
+export interface DesembolsoRow {
+  id: string;
+  deuda_id: string;
+  fecha: string;
+  valor: number;
+  mantiene: "cuota" | "plazo"; // cuota = la cuota no cambia y aumenta el plazo; plazo = el plazo no cambia y sube la cuota
   nota: string | null;
   registrado_por: string | null;
 }
@@ -44,11 +56,15 @@ export interface DeudaRow {
   numero_cuenta: string | null;
   alias_pago: string | null;
   dias_aviso_previo: number;
+  abono_mensual: number | null; // abono fijo extra a capital cada mes
+  abono_mensual_desde: string | null;
 }
 
 export interface DeudaConCuotas extends DeudaRow {
   cuotas: CuotaRow[];
   abonos: AbonoRow[];
+  desembolsos: DesembolsoRow[];
+  montoTotal: number; // valor inicial + aumentos del préstamo
   pagos: PagoDeudaRow[];
   restanteProxima: number; // lo que falta por pagar de la próxima cuota
   cuotasPagadas: number;
@@ -83,11 +99,14 @@ function primerPagoDe(d: DeudaRow): string {
   return d.fecha_primer_pago ?? sumarMeses(String(d.fecha_inicio).slice(0, 10), 1);
 }
 
-/** Saldo de capital que se debe hoy: valor inicial − capital de cuotas pagadas − abonos extra. */
-function saldoDe(d: DeudaRow, cuotas: CuotaRow[], abonos: AbonoRow[]): number {
-  const capitalPagado = cuotas.filter((c) => c.estado === "pagada").reduce((s, c) => s + Number(c.capital), 0);
+/** Saldo de capital que se debe hoy: valor inicial + aumentos − capital pagado (incluye abonos fijos) − abonos extra. */
+function saldoDe(d: DeudaRow, cuotas: CuotaRow[], abonos: AbonoRow[], desembolsos: DesembolsoRow[]): number {
+  const capitalPagado = cuotas
+    .filter((c) => c.estado === "pagada")
+    .reduce((s, c) => s + Number(c.capital) + Number(c.abono_extra ?? 0), 0);
   const abonado = abonos.reduce((s, a) => s + Number(a.valor), 0);
-  return Math.max(0, Math.round(Number(d.valor_inicial) - capitalPagado - abonado));
+  const aumentos = desembolsos.reduce((s, x) => s + Number(x.valor), 0);
+  return Math.max(0, Math.round(Number(d.valor_inicial) + aumentos - capitalPagado - abonado));
 }
 
 function chequear(error: any, que: string) {
@@ -101,11 +120,12 @@ export function useDeudas() {
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const [rD, rC, rA, rP] = await Promise.all([
+    const [rD, rC, rA, rP, rX] = await Promise.all([
       supabase.from("deudas").select("*").order("creado_en", { ascending: false }),
       supabase.from("cuotas_deuda").select("*").order("numero_cuota", { ascending: true }),
       supabase.from("abonos_deuda").select("*").order("fecha", { ascending: true }),
       supabase.from("pagos_deuda").select("*").order("fecha", { ascending: false }),
+      supabase.from("desembolsos_deuda").select("*").order("fecha", { ascending: true }),
     ]);
     const err = rD.error ?? rC.error;
     if (err) {
@@ -116,21 +136,26 @@ export function useDeudas() {
     // si la tabla de abonos aún no existe (falta correr el SQL), seguimos sin abonos
     const abonosData = (rA.error ? [] : rA.data ?? []) as AbonoRow[];
     const pagosData = (rP.error ? [] : rP.data ?? []) as PagoDeudaRow[];
+    const desembolsosData = (rX.error ? [] : rX.data ?? []) as DesembolsoRow[];
 
     const combinadas: DeudaConCuotas[] = (rD.data ?? []).map((d: DeudaRow) => {
       const cuotas = (rC.data ?? []).filter((c: CuotaRow) => c.deuda_id === d.id) as CuotaRow[];
       const abonos = abonosData.filter((a) => a.deuda_id === d.id);
+      const desembolsos = desembolsosData.filter((x) => x.deuda_id === d.id);
+      const montoTotal = Number(d.valor_inicial) + desembolsos.reduce((s, x) => s + Number(x.valor), 0);
       const pagadas = cuotas.filter((c) => c.estado === "pagada").length;
-      const saldoActual = saldoDe(d, cuotas, abonos);
+      const saldoActual = saldoDe(d, cuotas, abonos, desembolsos);
       const pendientes = cuotas.filter((c) => c.estado === "pendiente");
       return {
         ...d,
         cuotas,
         abonos,
+        desembolsos,
+        montoTotal,
         pagos: pagosData.filter((p) => p.deuda_id === d.id),
         restanteProxima: restanteDeCuota(pendientes[0]),
         cuotasPagadas: pagadas,
-        porcentajePagado: Number(d.valor_inicial) > 0 ? 1 - saldoActual / Number(d.valor_inicial) : 0,
+        porcentajePagado: montoTotal > 0 ? 1 - saldoActual / montoTotal : 0,
         proximaCuota: pendientes[0] ?? null,
         saldoActual,
         interesesPendientes: pendientes.reduce((s, c) => s + Number(c.interes), 0),
@@ -150,10 +175,11 @@ export function useDeudas() {
 
   /** Lee la deuda desde la base y vuelve a calcular todas las cuotas pendientes. */
   async function recalcularPendientes(deudaId: string, opciones: { mantenerCuota?: boolean } = {}) {
-    const [rD, rC, rA] = await Promise.all([
+    const [rD, rC, rA, rX] = await Promise.all([
       supabase.from("deudas").select("*").eq("id", deudaId).single(),
       supabase.from("cuotas_deuda").select("*").eq("deuda_id", deudaId).order("numero_cuota"),
       supabase.from("abonos_deuda").select("*").eq("deuda_id", deudaId),
+      supabase.from("desembolsos_deuda").select("*").eq("deuda_id", deudaId),
     ]);
     chequear(rD.error, "No se pudo leer la deuda");
     chequear(rC.error, "No se pudieron leer las cuotas");
@@ -161,15 +187,17 @@ export function useDeudas() {
     const d = rD.data as DeudaRow;
     const cuotas = (rC.data ?? []) as CuotaRow[];
     const abonos = (rA.data ?? []) as AbonoRow[];
+    const desembolsos = (rX.error ? [] : rX.data ?? []) as DesembolsoRow[];
 
     const pagadas = cuotas.filter((c) => c.estado === "pagada");
     const pendientes = cuotas.filter((c) => c.estado === "pendiente");
     const numeroInicial = pagadas.length ? Math.max(...pagadas.map((c) => c.numero_cuota)) + 1 : 1;
-    const saldo = saldoDe(d, cuotas, abonos);
+    const saldo = saldoDe(d, cuotas, abonos, desembolsos);
     const i = tasaMensual(Number(d.tasa_interes), d.tipo_tasa ?? "MV");
 
     let cuotaObjetivo: number | undefined;
-    if (opciones.mantenerCuota && pendientes[0]) {
+    if (opciones.mantenerCuota && pendientes.length) {
+      // la cuota base (capital + interés) vigente: la de la próxima cuota (la última viene ajustada por redondeo)
       cuotaObjetivo = Number(pendientes[0].capital) + Number(pendientes[0].interes);
     }
     const nuevas = generarCuotas({
@@ -181,6 +209,8 @@ export function useDeudas() {
       numeroInicial,
       cuotaObjetivo,
       cuotasRestantes: Math.max(1, Number(d.plazo_meses) - pagadas.length),
+      abonoMensual: Number(d.abono_mensual ?? 0),
+      abonoDesde: d.abono_mensual_desde,
     });
 
     const { error: errBorrar } = await supabase.from("cuotas_deuda").delete().eq("deuda_id", deudaId).eq("estado", "pendiente");
@@ -192,7 +222,7 @@ export function useDeudas() {
     await reaplicarPagos(deudaId); // vuelve a ubicar pagos parciales en las cuotas nuevas
     const { error: errPlazo } = await supabase
       .from("deudas")
-      .update({ plazo_meses: pagadas.length + nuevas.length })
+      .update({ plazo_meses: pagadas.length + (nuevas.cuotasBase ?? nuevas.length) }) // plazo de referencia, sin abonos fijos
       .eq("id", deudaId);
     chequear(errPlazo, "No se pudo actualizar el plazo");
   }
@@ -340,6 +370,45 @@ export function useDeudas() {
     await cargar();
   }
 
+  /**
+   * Aumento del préstamo en una fecha (ej. el prestamista entrega más dinero).
+   *  - mantiene "cuota": se paga la misma cuota y aumenta el número de cuotas.
+   *  - mantiene "plazo": se termina en la misma fecha y sube la cuota.
+   */
+  async function registrarDesembolso(deudaId: string, valor: number, fecha: string, mantiene: "cuota" | "plazo", nota?: string) {
+    const { data: creado, error: err } = await supabase
+      .from("desembolsos_deuda")
+      .insert({ deuda_id: deudaId, valor: Math.round(valor), fecha, mantiene, nota: nota ?? null, registrado_por: await nombreUsuario() })
+      .select()
+      .single();
+    chequear(err, "No se pudo registrar el aumento del préstamo");
+    try {
+      await recalcularPendientes(deudaId, { mantenerCuota: mantiene === "cuota" });
+    } catch (e) {
+      await supabase.from("desembolsos_deuda").delete().eq("id", creado.id);
+      throw e;
+    }
+    await cargar();
+  }
+
+  async function eliminarDesembolso(x: DesembolsoRow) {
+    const { error: err } = await supabase.from("desembolsos_deuda").delete().eq("id", x.id);
+    chequear(err, "No se pudo borrar el aumento");
+    await recalcularPendientes(x.deuda_id, { mantenerCuota: x.mantiene === "cuota" });
+    await cargar();
+  }
+
+  /** Abono fijo extra a capital en cada cuota desde `desde`. Valor 0 lo quita. La cuota base no cambia; se acorta el plazo. */
+  async function definirAbonoMensual(deudaId: string, valor: number, desde: string | null) {
+    const { error: err } = await supabase
+      .from("deudas")
+      .update({ abono_mensual: valor > 0 ? Math.round(valor) : 0, abono_mensual_desde: valor > 0 ? desde : null })
+      .eq("id", deudaId);
+    chequear(err, "No se pudo guardar el abono mensual");
+    await recalcularPendientes(deudaId, { mantenerCuota: true });
+    await cargar();
+  }
+
   /** Borra un abono registrado por error y deshace su efecto en las cuotas. */
   async function eliminarAbono(abono: AbonoRow) {
     const { error: err } = await supabase.from("abonos_deuda").delete().eq("id", abono.id);
@@ -359,6 +428,9 @@ export function useDeudas() {
     eliminarPago,
     registrarAbono,
     eliminarAbono,
+    registrarDesembolso,
+    eliminarDesembolso,
+    definirAbonoMensual,
     recargar: cargar,
   };
 }

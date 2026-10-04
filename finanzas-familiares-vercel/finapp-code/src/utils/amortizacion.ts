@@ -90,7 +90,8 @@ export interface FilaCuota {
   capital: number;
   interes: number;
   seguro: number;
-  cuota_total: number; // capital + interés + seguro
+  abono_extra: number; // abono fijo mensual a capital (si hay)
+  cuota_total: number; // capital + interés + seguro + abono extra
   saldo: number; // saldo después de pagar esta cuota
 }
 
@@ -99,6 +100,9 @@ export interface FilaCuota {
  * - `numeroInicial`: número de la primera cuota que se genera (para continuar después de las pagadas).
  * - `cuotasRestantes`: cuántas cuotas quedan (se calcula la cuota fija), o
  * - `cuotaObjetivo`: una cuota fija de capital+interés ya conocida (se calcula cuántas cuotas faltan).
+ * - `abonoMensual` / `abonoDesde`: abono extra fijo a capital en cada cuota que vence desde esa fecha
+ *   (siempre acorta el plazo; la cuota base no cambia).
+ * Devuelve las filas y `cuotasBase`: cuántas cuotas tendría el plan SIN abonos extra (sirve como plazo de referencia).
  */
 export function generarCuotas(params: {
   saldo: number;
@@ -109,7 +113,9 @@ export function generarCuotas(params: {
   numeroInicial: number;
   cuotasRestantes?: number;
   cuotaObjetivo?: number;
-}): FilaCuota[] {
+  abonoMensual?: number;
+  abonoDesde?: string | null;
+}): FilaCuota[] & { cuotasBase?: number } {
   const { iMensual, seguroMensual, fechaPrimerPago, diaPago, numeroInicial } = params;
   let saldo = Math.round(params.saldo);
   if (saldo <= 0) return [];
@@ -125,25 +131,31 @@ export function generarCuotas(params: {
     cuota = Math.round(cuotaFija(saldo, iMensual, n));
   }
 
-  const filas: FilaCuota[] = [];
+  const extraMensual = Math.max(0, Math.round(params.abonoMensual || 0));
+  const filas: FilaCuota[] & { cuotasBase?: number } = [];
   for (let k = 0; k < n && saldo > 0; k++) {
     const numero = numeroInicial + k;
+    const fecha = fechaCuota(fechaPrimerPago, numero, diaPago);
     const interes = Math.round(saldo * iMensual);
     const ultima = k === n - 1;
     let capital = cuota - interes;
     if (ultima || capital >= saldo) capital = saldo; // la última cuota cierra el saldo exacto
-    saldo = saldo - capital;
+    const aplicaExtra = extraMensual > 0 && (!params.abonoDesde || fecha >= params.abonoDesde);
+    const abono_extra = aplicaExtra ? Math.min(extraMensual, saldo - capital) : 0;
+    saldo = saldo - capital - abono_extra;
     const seguro = Math.round(seguroMensual || 0);
     filas.push({
       numero_cuota: numero,
-      fecha_vencimiento: fechaCuota(fechaPrimerPago, numero, diaPago),
+      fecha_vencimiento: fecha,
       capital,
       interes,
       seguro,
-      cuota_total: capital + interes + seguro,
+      abono_extra,
+      cuota_total: capital + interes + seguro + abono_extra,
       saldo,
     });
   }
+  filas.cuotasBase = n;
   return filas;
 }
 

@@ -47,6 +47,7 @@ export default function IngresosScreen() {
         { icono: "car", texto: "Carro rentado", valor: a.vehiculo, donde: "Se registra en Vehículo rentado" },
         { icono: "trending-up", texto: "Inversiones en conjunto", valor: a.inversiones, donde: "Ingresos registrados en Inversiones" },
         { icono: "people", texto: "Préstamos a terceros (abonos recibidos)", valor: a.prestamosCobrados, donde: "Abonos registrados en Préstamos personales" },
+        ...(a.desembolsos > 0 ? [{ icono: "card", texto: "Aumentos de créditos recibidos", valor: a.desembolsos, donde: "Registrados en Deudas (Aumentar préstamo)" }] : []),
       ]
     : [];
   const totalOtras = otras.reduce((s, o) => s + o.valor, 0);
