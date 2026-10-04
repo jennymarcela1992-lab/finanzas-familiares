@@ -2,12 +2,15 @@ import React, { useMemo, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Alert, ScrollView, Switch } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useDeudas, DeudaConCuotas, CuotaRow, AbonoRow, DatosDeuda } from "../../hooks/useDeudas";
+import { usePersonas } from "../../hooks/usePersonas";
+import { PagoDeudaRow } from "../../utils/pagosDeuda";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import ProgressBar from "../../components/ProgressBar";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
+import FechaInput from "../../components/FechaInput";
 import {
   TipoTasa,
   TIPOS_TASA,
@@ -41,10 +44,13 @@ export default function DeudasScreen() {
     crearDeuda,
     editarDeuda,
     eliminarDeuda,
-    marcarPagadaHasta,
-    desmarcarPagada,
+    registrarPago,
+    eliminarPago,
     registrarAbono,
     eliminarAbono,
+    registrarDesembolso,
+    eliminarDesembolso,
+    definirAbonoMensual,
   } = useDeudas();
 
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -54,6 +60,14 @@ export default function DeudasScreen() {
   const [guardando, setGuardando] = useState(false);
   const [deudaAbierta, setDeudaAbierta] = useState<string | null>(null);
   const [abonoEn, setAbonoEn] = useState<string | null>(null);
+  const [pagoEn, setPagoEn] = useState<string | null>(null);
+  const [aumentoEn, setAumentoEn] = useState<string | null>(null);
+  const abrirPanel = (panel: "pago" | "abono" | "aumento", id: string) => {
+    setPagoEn(panel === "pago" && pagoEn !== id ? id : null);
+    setAbonoEn(panel === "abono" && abonoEn !== id ? id : null);
+    setAumentoEn(panel === "aumento" && aumentoEn !== id ? id : null);
+  };
+  const { personas, yo } = usePersonas();
 
   const cambiar = (campo: keyof typeof FORM_VACIO) => (v: string) => setForm((f) => ({ ...f, [campo]: v }));
 
@@ -147,19 +161,19 @@ export default function DeudasScreen() {
     ]);
   }
 
-  function tocarCuota(d: DeudaConCuotas, c: CuotaRow) {
+  function tocarCuota(c: CuotaRow) {
     if (c.estado === "pagada") {
-      Alert.alert("Cuota pagada", `¿Desmarcar la cuota #${c.numero_cuota}? Volverá a quedar pendiente.`, [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Desmarcar", onPress: () => desmarcarPagada(c.id).catch((e) => Alert.alert("Error", e.message)) },
-      ]);
-      return;
+      Alert.alert(`Cuota #${c.numero_cuota} pagada`, `Pagó: ${c.pagada_por ?? "—"}${c.fecha_pago ? ` · ${formatoFecha(c.fecha_pago)}` : ""}\n\nPara corregirla, borra el pago en la lista "Pagos registrados".`);
+    } else {
+      Alert.alert(`Cuota #${c.numero_cuota}`, `Falta ${pesos(Number(c.cuota_total) - Number(c.valor_pagado ?? 0))}. Queda pagada cuando registres el pago (botón "Registrar pago", un gasto de crédito o un arriendo).`);
     }
-    const primera = d.proximaCuota?.numero_cuota ?? c.numero_cuota;
-    const rango = primera < c.numero_cuota ? `las cuotas #${primera} a #${c.numero_cuota}` : `la cuota #${c.numero_cuota}`;
-    Alert.alert("Registrar pago", `¿Marcar como pagada ${rango}? Se registra con fecha de hoy.`, [
+  }
+
+  function confirmarBorrarPago(p: PagoDeudaRow) {
+    const extra = p.gasto_id ? " También se borra el gasto asociado." : p.arriendo_id ? " El arriendo sigue registrado como entrada." : "";
+    Alert.alert("Borrar pago", `¿Borrar el pago de ${pesos(Number(p.valor))} (${p.pagado_por ?? ""}, ${formatoFecha(p.fecha)})?${extra}`, [
       { text: "Cancelar", style: "cancel" },
-      { text: "Marcar pagada", onPress: () => marcarPagadaHasta(d.id, c.numero_cuota).catch((e) => Alert.alert("Error", e.message)) },
+      { text: "Borrar", style: "destructive", onPress: () => eliminarPago(p).catch((e) => Alert.alert("Error", e.message)) },
     ]);
   }
 
@@ -211,13 +225,7 @@ export default function DeudasScreen() {
           <TextInput style={styles.input} placeholder="Ej. 85.000" placeholderTextColor={colors.textMuted} value={form.seguro} onChangeText={cambiar("seguro")} keyboardType="numeric" />
 
           <Text style={styles.label}>Fecha de la primera cuota</Text>
-          <TextInput
-            style={[styles.input, !fechaOk && form.fechaPrimerPago.length > 0 && styles.inputError]}
-            placeholder="AAAA-MM-DD (ej. 2026-11-05)"
-            placeholderTextColor={colors.textMuted}
-            value={form.fechaPrimerPago}
-            onChangeText={cambiar("fechaPrimerPago")}
-          />
+          <FechaInput value={form.fechaPrimerPago} onChange={cambiar("fechaPrimerPago")} />
           <Text style={styles.ayuda}>Las siguientes cuotas vencen el mismo día cada mes.</Text>
 
           {!editandoId && fechaEnPasado && (
@@ -284,7 +292,7 @@ export default function DeudasScreen() {
             <ProgressBar progreso={d.porcentajePagado} />
           </View>
           <Text style={typography.caption}>
-            Saldo {pesos(d.saldoActual)} de {pesos(Number(d.valor_inicial))} · {d.cuotasPagadas} de {d.cuotas.length} cuotas pagadas
+            Saldo {pesos(d.saldoActual)} de {pesos(d.montoTotal)} · {d.cuotasPagadas} de {d.cuotas.length} cuotas pagadas
           </Text>
           {!terminada && ultima && (
             <Text style={typography.caption}>
@@ -310,40 +318,112 @@ export default function DeudasScreen() {
           <View>
             <View style={styles.acciones}>
               {d.proximaCuota && (
-                <Accion icono="checkmark-circle" texto="Pagué la cuota" onPress={() => tocarCuota(d, d.proximaCuota!)} />
+                <Accion icono="checkmark-circle" texto="Registrar pago" onPress={() => abrirPanel("pago", d.id)} />
               )}
-              {!terminada && <Accion icono="cash" texto="Abono extra" onPress={() => setAbonoEn(abonoEn === d.id ? null : d.id)} />}
+              {!terminada && <Accion icono="cash" texto="Abono extra" onPress={() => abrirPanel("abono", d.id)} />}
+              {!terminada && <Accion icono="add-circle" texto="Aumentar préstamo" onPress={() => abrirPanel("aumento", d.id)} />}
               <Accion icono="create" texto="Editar" onPress={() => abrirEdicion(d)} />
               <Accion icono="trash" texto="Eliminar" color={colors.danger} onPress={() => confirmarEliminar(d)} />
             </View>
 
-            {abonoEn === d.id && <FormAbono deuda={d} onCerrar={() => setAbonoEn(null)} registrar={registrarAbono} />}
+            {pagoEn === d.id && <FormPago deuda={d} personas={personas} yo={yo} onCerrar={() => setPagoEn(null)} registrar={registrarPago} />}
+            {abonoEn === d.id && <FormAbono deuda={d} onCerrar={() => setAbonoEn(null)} registrar={registrarAbono} definirMensual={definirAbonoMensual} registrarPago={registrarPago} personas={personas} yo={yo} />}
+            {aumentoEn === d.id && <FormAumento deuda={d} onCerrar={() => setAumentoEn(null)} registrar={registrarDesembolso} />}
+            {Number(d.abono_mensual ?? 0) > 0 && (
+              <View style={styles.fijoBox}>
+                <Ionicons name="repeat" size={15} color={colors.primary} />
+                <Text style={styles.fijoTexto}>
+                  Abono fijo de {pesos(Number(d.abono_mensual))} cada mes
+                  {d.abono_mensual_desde ? ` desde ${formatoFecha(d.abono_mensual_desde)}` : ""}
+                </Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    Alert.alert("Quitar abono mensual", "¿Dejar de sumar el abono fijo a las cuotas pendientes? El plazo se recalcula.", [
+                      { text: "Cancelar", style: "cancel" },
+                      { text: "Quitar", style: "destructive", onPress: () => definirAbonoMensual(d.id, 0, null).catch((e) => Alert.alert("Error", e.message)) },
+                    ])
+                  }
+                >
+                  <Text style={styles.fijoQuitar}>Quitar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             <Text style={[styles.label, { marginTop: spacing.md }]}>Tabla de amortización</Text>
-            <Text style={styles.ayuda}>Toca una cuota pendiente para marcarla pagada, o una pagada para desmarcarla.</Text>
+            <Text style={styles.ayuda}>Una cuota queda pagada cuando se registra su pago. Toca una cuota para ver el detalle.</Text>
             <ScrollView style={{ maxHeight: 340, marginTop: spacing.xs }} nestedScrollEnabled>
               {d.cuotas.map((c) => {
                 const pagada = c.estado === "pagada";
                 return (
-                  <TouchableOpacity key={c.id} style={styles.cuotaRow} onPress={() => tocarCuota(d, c)}>
+                  <TouchableOpacity key={c.id} style={styles.cuotaRow} onPress={() => tocarCuota(c)}>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.cuotaTexto, pagada && styles.cuotaPagada]}>
                         #{c.numero_cuota} · {formatoFecha(c.fecha_vencimiento)} · <Text style={{ fontWeight: "700" }}>{pesos(Number(c.cuota_total))}</Text>
                       </Text>
                       <Text style={styles.cuotaDetalle}>
                         Capital {pesos(Number(c.capital))} · Interés {pesos(Number(c.interes))}
-                        {Number(c.seguro) ? ` · Seguros ${pesos(Number(c.seguro))}` : ""} · Saldo {pesos(Number(c.saldo))}
+                        {Number(c.seguro) ? ` · Seguros ${pesos(Number(c.seguro))}` : ""}
+                        {Number(c.abono_extra) ? ` · Abono fijo ${pesos(Number(c.abono_extra))}` : ""} · Saldo {pesos(Number(c.saldo))}
                       </Text>
+                      {!pagada && Number(c.valor_pagado ?? 0) > 0 && (
+                        <Text style={styles.parcial}>Abonado {pesos(Number(c.valor_pagado))} · falta {pesos(Number(c.cuota_total) - Number(c.valor_pagado))}</Text>
+                      )}
                     </View>
                     <View style={[styles.pill, pagada ? styles.pillSuccess : styles.pillWarning]}>
                       <Text style={[styles.pillText, pagada ? styles.pillTextSuccess : styles.pillTextWarning]}>
-                        {pagada ? `✓ ${c.pagada_por ?? "Pagada"}` : "Pendiente"}
+                        {pagada ? `✓ ${c.pagada_por ?? "Pagada"}` : Number(c.valor_pagado ?? 0) > 0 ? "Parcial" : "Pendiente"}
                       </Text>
                     </View>
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
+
+            {d.pagos.length > 0 && (
+              <View style={{ marginTop: spacing.md }}>
+                <Text style={styles.label}>Pagos registrados</Text>
+                {d.pagos.filter((p) => p.origen !== "registro_inicial").slice(0, 12).map((p) => (
+                  <TouchableOpacity key={p.id} style={styles.cuotaRow} onPress={() => confirmarBorrarPago(p)}>
+                    <Ionicons name={p.origen === "arriendo" ? "business" : "person"} size={14} color={colors.primary} />
+                    <Text style={[styles.cuotaTexto, { flex: 1 }]}>
+                      {formatoFecha(p.fecha)} · <Text style={{ fontWeight: "700" }}>{pesos(Number(p.valor))}</Text> · {p.pagado_por}
+                    </Text>
+                    <Ionicons name="close-circle-outline" size={16} color={colors.textMuted} />
+                  </TouchableOpacity>
+                ))}
+                {d.pagos.some((p) => p.origen === "registro_inicial") && (
+                  <Text style={styles.ayuda}>
+                    {d.pagos.filter((p) => p.origen === "registro_inicial").length} cuota(s) quedaron pagadas en el registro inicial del crédito.
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {d.desembolsos.length > 0 && (
+              <View style={{ marginTop: spacing.md }}>
+                <Text style={styles.label}>Aumentos del préstamo</Text>
+                {d.desembolsos.map((x) => (
+                  <TouchableOpacity
+                    key={x.id}
+                    style={styles.cuotaRow}
+                    onPress={() =>
+                      Alert.alert("Borrar aumento", `¿Borrar el aumento de ${pesos(Number(x.valor))} del ${formatoFecha(x.fecha)}? Las cuotas se recalculan.`, [
+                        { text: "Cancelar", style: "cancel" },
+                        { text: "Borrar", style: "destructive", onPress: () => eliminarDesembolso(x).catch((e) => Alert.alert("Error", e.message)) },
+                      ])
+                    }
+                  >
+                    <Ionicons name="add-circle" size={14} color={colors.primary} />
+                    <Text style={[styles.cuotaTexto, { flex: 1 }]}>
+                      {formatoFecha(x.fecha)} · <Text style={{ fontWeight: "700" }}>+{pesos(Number(x.valor))}</Text> ·{" "}
+                      {x.mantiene === "cuota" ? "mantuvo la cuota" : "mantuvo el plazo"}
+                      {x.nota ? ` · ${x.nota}` : ""}
+                    </Text>
+                    <Ionicons name="close-circle-outline" size={16} color={colors.textMuted} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             {d.abonos.length > 0 && (
               <View style={{ marginTop: spacing.md }}>
@@ -404,68 +484,176 @@ function Accion({ icono, texto, onPress, color = colors.primary }: { icono: any;
   );
 }
 
-// ---------- Abono extra con vista previa ----------
-function FormAbono({
+// ---------- Registrar pago de cuota ----------
+function FormPago({
   deuda,
+  personas,
+  yo,
   onCerrar,
   registrar,
 }: {
   deuda: DeudaConCuotas;
+  personas: string[];
+  yo: string;
   onCerrar: () => void;
-  registrar: (id: string, valor: number, fecha: string, modalidad: "plazo" | "cuota", nota?: string) => Promise<void>;
+  registrar: (id: string, valor: number, fecha: string, persona: string) => Promise<void>;
 }) {
-  const [valor, setValor] = useState("");
+  const [valor, setValor] = useState(deuda.restanteProxima.toLocaleString("es-CO"));
   const [fecha, setFecha] = useState(hoyISO());
-  const [modalidad, setModalidad] = useState<"plazo" | "cuota">("plazo");
+  const [persona, setPersona] = useState(yo || personas[0] || "");
   const [guardando, setGuardando] = useState(false);
+  const c = deuda.proximaCuota;
 
+  async function guardar() {
+    const v = aNumero(valor);
+    if (!(v > 0)) return Alert.alert("Valor no válido", "Escribe el valor pagado.");
+    if (!esFechaValida(fecha)) return Alert.alert("Fecha no válida", "Escribe la fecha así: AAAA-MM-DD.");
+    if (!persona) return Alert.alert("Falta quién pagó", "Elige quién hizo el pago.");
+    setGuardando(true);
+    try {
+      await registrar(deuda.id, v, fecha, persona);
+      onCerrar();
+    } catch (e: any) {
+      Alert.alert("Error", e.message ?? "No se pudo registrar el pago.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <View style={styles.abonoBox}>
+      <Text style={typography.h3}>Registrar pago</Text>
+      {c && (
+        <Text style={styles.ayuda}>
+          Cuota #{c.numero_cuota} vence {formatoFecha(c.fecha_vencimiento)} · falta {pesos(deuda.restanteProxima)}. Si pagas más, el excedente pasa a la siguiente cuota.
+        </Text>
+      )}
+      <Text style={styles.label}>¿Quién pagó?</Text>
+      <View style={styles.chips}>
+        {(personas.length ? personas : [yo]).filter(Boolean).map((p) => (
+          <TouchableOpacity key={p} onPress={() => setPersona(p)} style={[styles.chip, persona === p && styles.chipActivo]}>
+            <Text style={[styles.chipTexto, persona === p && styles.chipTextoActivo]}>{p}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <Text style={[styles.ayuda, { marginTop: 4 }]}>Si la pagó un arriendo, regístralo en Propiedades y elige este crédito como destino.</Text>
+      <Text style={styles.label}>Valor pagado</Text>
+      <TextInput style={styles.input} value={valor} onChangeText={setValor} keyboardType="numeric" placeholder="Valor" placeholderTextColor={colors.textMuted} />
+      <Text style={styles.label}>Fecha del pago</Text>
+      <FechaInput value={fecha} onChange={setFecha} max={hoyISO()} />
+      <Text style={styles.ayuda}>Queda también como gasto (rubro Créditos) a nombre de quien pagó.</Text>
+      <PrimaryButton title="Guardar pago" onPress={guardar} loading={guardando} />
+      <PrimaryButton title="Cancelar" variant="outline" onPress={onCerrar} style={{ marginTop: spacing.sm }} />
+    </View>
+  );
+}
+
+// ---------- Abono extra con vista previa ----------
+/** Cuota base vigente (capital + interés), sin seguros ni abonos fijos. */
+function cuotaBase(pendientes: CuotaRow[]) {
+  return pendientes.length ? Number(pendientes[0].capital) + Number(pendientes[0].interes) : 0;
+}
+
+function simular(deuda: DeudaConCuotas, saldo: number, extra: { cuotaObjetivo?: number; cuotasRestantes?: number; abonoMensual?: number; abonoDesde?: string | null }) {
   const pendientes = deuda.cuotas.filter((c) => c.estado === "pendiente");
   const proxima = pendientes[0];
-
-  const simulacion = useMemo(() => {
-    const v = aNumero(valor);
-    if (!(v > 0) || !proxima || v > deuda.saldoActual) return null;
-    const base = {
-      saldo: deuda.saldoActual - v,
+  if (!proxima) return null;
+  try {
+    const filas = generarCuotas({
+      saldo,
       iMensual: deuda.iMensual,
       seguroMensual: Number(deuda.seguro_mensual ?? 0),
       fechaPrimerPago: deuda.primerPago,
       diaPago: deuda.dia_pago,
       numeroInicial: proxima.numero_cuota,
+      abonoMensual: extra.abonoMensual ?? Number(deuda.abono_mensual ?? 0),
+      abonoDesde: extra.abonoDesde ?? deuda.abono_mensual_desde,
+      cuotaObjetivo: extra.cuotaObjetivo,
+      cuotasRestantes: extra.cuotasRestantes,
+    });
+    const intActual = pendientes.reduce((s, c) => s + Number(c.interes), 0);
+    const intNuevo = filas.reduce((s, c) => s + c.interes, 0);
+    return {
+      cuotas: filas.length,
+      fin: filas[filas.length - 1]?.fecha_vencimiento,
+      cuotaNueva: filas[0] ? filas[0].capital + filas[0].interes + filas[0].seguro : 0,
+      difIntereses: intActual - intNuevo, // positivo = ahorro; negativo = intereses adicionales
     };
-    try {
-      const porPlazo = generarCuotas({ ...base, cuotaObjetivo: Number(proxima.capital) + Number(proxima.interes) });
-      const porCuota = generarCuotas({ ...base, cuotasRestantes: pendientes.length });
-      const intActual = pendientes.reduce((s, c) => s + Number(c.interes), 0);
-      return {
-        plazo: {
-          cuotas: porPlazo.length,
-          fin: porPlazo[porPlazo.length - 1]?.fecha_vencimiento,
-          ahorro: intActual - porPlazo.reduce((s, c) => s + c.interes, 0),
-        },
-        cuota: {
-          nueva: porCuota[0]?.cuota_total ?? 0,
-          ahorro: intActual - porCuota.reduce((s, c) => s + c.interes, 0),
-        },
-      };
-    } catch {
-      return null;
+  } catch (e: any) {
+    return { error: e.message as string };
+  }
+}
+
+// ---------- Abono extra (solo este mes o cada mes) con vista previa ----------
+function FormAbono({
+  deuda,
+  onCerrar,
+  registrar,
+  definirMensual,
+  registrarPago,
+  personas,
+  yo,
+}: {
+  deuda: DeudaConCuotas;
+  onCerrar: () => void;
+  registrar: (id: string, valor: number, fecha: string, modalidad: "plazo" | "cuota", nota?: string) => Promise<void>;
+  definirMensual: (id: string, valor: number, desde: string | null) => Promise<void>;
+  registrarPago: (id: string, valor: number, fecha: string, persona: string) => Promise<void>;
+  personas: string[];
+  yo: string;
+}) {
+  const pendientes = deuda.cuotas.filter((c) => c.estado === "pendiente");
+  const proxima = pendientes[0];
+  const [frecuencia, setFrecuencia] = useState<"una" | "mensual">("una");
+  const [valor, setValor] = useState("");
+  const [fecha, setFecha] = useState(hoyISO());
+  const [desde, setDesde] = useState(proxima?.fecha_vencimiento ?? hoyISO());
+  const [modalidad, setModalidad] = useState<"plazo" | "cuota">("plazo");
+  const [destino, setDestino] = useState<"capital" | "cuotas">("capital");
+  const [persona, setPersona] = useState(yo || personas[0] || "");
+  const [guardando, setGuardando] = useState(false);
+  const base = cuotaBase(pendientes);
+  const cuotaActual = proxima ? Number(proxima.capital) + Number(proxima.interes) + Number(proxima.seguro ?? 0) : 0;
+  const totalPendiente = pendientes.reduce((s, c) => s + Number(c.cuota_total) - Number(c.valor_pagado ?? 0), 0);
+
+  // Adelanto: cómo se reparte el valor entre las próximas cuotas
+  const reparto = useMemo(() => {
+    let resto = aNumero(valor) || 0;
+    const filas: { numero: number; fecha: string; aplicado: number; completa: boolean }[] = [];
+    for (const c of pendientes) {
+      if (resto <= 0) break;
+      const falta = Number(c.cuota_total) - Number(c.valor_pagado ?? 0);
+      const aplicado = Math.min(resto, falta);
+      filas.push({ numero: c.numero_cuota, fecha: c.fecha_vencimiento, aplicado, completa: aplicado >= falta - 1 });
+      resto -= aplicado;
     }
-  }, [valor, deuda, proxima, pendientes]);
+    return filas;
+  }, [valor, pendientes]);
+
+  const sim = useMemo(() => {
+    const v = aNumero(valor);
+    if (!(v > 0) || !proxima) return null;
+    if (frecuencia === "mensual") {
+      return { mensual: simular(deuda, deuda.saldoActual, { cuotaObjetivo: base, abonoMensual: v, abonoDesde: desde }) };
+    }
+    if (v > deuda.saldoActual) return null;
+    return {
+      plazo: simular(deuda, deuda.saldoActual - v, { cuotaObjetivo: base }),
+      cuota: simular(deuda, deuda.saldoActual - v, { cuotasRestantes: Math.max(1, Number(deuda.plazo_meses) - deuda.cuotasPagadas) }),
+    };
+  }, [valor, frecuencia, desde, deuda]);
 
   async function guardar() {
     const v = aNumero(valor);
-    if (!(v > 0)) {
-      Alert.alert("Valor no válido", "Escribe el valor del abono.");
-      return;
-    }
-    if (!esFechaValida(fecha)) {
-      Alert.alert("Fecha no válida", "Escribe la fecha así: AAAA-MM-DD.");
-      return;
-    }
+    if (!(v > 0)) return Alert.alert("Valor no válido", "Escribe el valor del abono.");
+    const adelanto = frecuencia === "una" && destino === "cuotas";
+    if (adelanto && v > totalPendiente) return Alert.alert("Valor no válido", `Supera lo que falta por pagar de todas las cuotas (${pesos(totalPendiente)}).`);
+    if (adelanto && !persona) return Alert.alert("Falta quién pagó", "Elige quién hizo el abono.");
     setGuardando(true);
     try {
-      await registrar(deuda.id, v, fecha, modalidad);
+      if (frecuencia === "mensual") await definirMensual(deuda.id, v, desde);
+      else if (adelanto) await registrarPago(deuda.id, v, fecha, persona);
+      else await registrar(deuda.id, v, fecha, modalidad);
       onCerrar();
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo registrar el abono.");
@@ -474,39 +662,208 @@ function FormAbono({
     }
   }
 
+  const textoSim = (r: any) =>
+    !r ? null : r.error ? r.error : `Quedan ${r.cuotas} cuotas (antes ${pendientes.length})${r.fin ? ` · terminas ${formatoFecha(r.fin)}` : ""} · ahorras ${pesos(r.difIntereses)} en intereses`;
+
   return (
     <View style={styles.abonoBox}>
-      <Text style={typography.h3}>Abono extra a capital</Text>
+      <Text style={typography.h3}>Abono extra</Text>
       <Text style={styles.ayuda}>Saldo actual: {pesos(deuda.saldoActual)}</Text>
-      <TextInput style={styles.input} placeholder="Valor del abono (ej. 5.000.000)" placeholderTextColor={colors.textMuted} value={valor} onChangeText={setValor} keyboardType="numeric" />
-      <TextInput style={styles.input} placeholder="Fecha AAAA-MM-DD" placeholderTextColor={colors.textMuted} value={fecha} onChangeText={setFecha} />
 
-      <TouchableOpacity style={[styles.opcion, modalidad === "plazo" && styles.opcionActiva]} onPress={() => setModalidad("plazo")}>
-        <Ionicons name={modalidad === "plazo" ? "radio-button-on" : "radio-button-off"} size={18} color={colors.primary} />
+      <Text style={styles.label}>¿Es solo para este mes o para cada mes?</Text>
+      <View style={styles.chips}>
+        {[
+          { v: "una", t: "Solo este mes" },
+          { v: "mensual", t: "Cada mes (fijo)" },
+        ].map((o) => (
+          <TouchableOpacity key={o.v} onPress={() => setFrecuencia(o.v as any)} style={[styles.chip, frecuencia === o.v && styles.chipActivo]}>
+            <Text style={[styles.chipTexto, frecuencia === o.v && styles.chipTextoActivo]}>{o.t}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <Text style={[styles.label, { marginTop: spacing.sm }]}>{frecuencia === "mensual" ? "Valor que abonas cada mes" : "Valor del abono"}</Text>
+      <TextInput style={styles.input} placeholder={frecuencia === "mensual" ? "Ej. 300.000" : "Ej. 5.000.000"} placeholderTextColor={colors.textMuted} value={valor} onChangeText={setValor} keyboardType="numeric" />
+
+      {frecuencia === "una" ? (
+        <>
+          <Text style={styles.label}>Fecha del abono</Text>
+          <FechaInput value={fecha} onChange={setFecha} max={hoyISO()} />
+
+          <Text style={styles.label}>¿A dónde va el abono?</Text>
+          <View style={styles.chips}>
+            {[
+              { v: "capital", t: "Directo a capital" },
+              { v: "cuotas", t: "A la(s) siguiente(s) cuota(s)" },
+            ].map((o) => (
+              <TouchableOpacity key={o.v} onPress={() => setDestino(o.v as any)} style={[styles.chip, destino === o.v && styles.chipActivo]}>
+                <Text style={[styles.chipTexto, destino === o.v && styles.chipTextoActivo]}>{o.t}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={[styles.ayuda, { marginTop: 4 }]}>
+            {destino === "capital"
+              ? "Baja el saldo de la deuda y se recalcula la tabla: ahorras intereses."
+              : "Es un adelanto: paga por anticipado las próximas cuotas tal como están en la tabla. No cambia la tabla ni los intereses."}
+          </Text>
+
+          {destino === "cuotas" ? (
+            <View>
+              <Text style={styles.label}>¿Quién pagó?</Text>
+              <View style={styles.chips}>
+                {(personas.length ? personas : [yo]).filter(Boolean).map((p) => (
+                  <TouchableOpacity key={p} onPress={() => setPersona(p)} style={[styles.chip, persona === p && styles.chipActivo]}>
+                    <Text style={[styles.chipTexto, persona === p && styles.chipTextoActivo]}>{p}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {reparto.length > 0 && (
+                <View style={[styles.opcion, styles.opcionActiva, { marginTop: spacing.sm }]}>
+                  <Ionicons name="calendar" size={18} color={colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.opcionTitulo}>Así se aplica el adelanto</Text>
+                    {reparto.map((r) => (
+                      <Text key={r.numero} style={styles.opcionDetalle}>
+                        Cuota #{r.numero} ({formatoFecha(r.fecha)}): {pesos(r.aplicado)} {r.completa ? "· queda pagada" : "· queda parcial"}
+                      </Text>
+                    ))}
+                    {(aNumero(valor) || 0) > totalPendiente && <Text style={[styles.opcionDetalle, { color: colors.danger }]}>Supera lo que falta por pagar.</Text>}
+                  </View>
+                </View>
+              )}
+              <Text style={styles.ayuda}>Queda también como gasto (rubro Créditos) a nombre de quien pagó.</Text>
+            </View>
+          ) : (
+          <>
+          <TouchableOpacity style={[styles.opcion, modalidad === "plazo" && styles.opcionActiva]} onPress={() => setModalidad("plazo")}>
+            <Ionicons name={modalidad === "plazo" ? "radio-button-on" : "radio-button-off"} size={18} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.opcionTitulo}>Reducir el plazo (misma cuota, terminas antes)</Text>
+              {sim?.plazo && <Text style={styles.opcionDetalle}>{textoSim(sim.plazo)}</Text>}
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.opcion, modalidad === "cuota" && styles.opcionActiva]} onPress={() => setModalidad("cuota")}>
+            <Ionicons name={modalidad === "cuota" ? "radio-button-on" : "radio-button-off"} size={18} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.opcionTitulo}>Reducir la cuota (mismo plazo, pagas menos al mes)</Text>
+              {sim?.cuota && !("error" in sim.cuota && sim.cuota.error) && (
+                <Text style={styles.opcionDetalle}>
+                  Nueva cuota {pesos((sim.cuota as any).cuotaNueva)} (antes {pesos(cuotaActual)}) · ahorras {pesos((sim.cuota as any).difIntereses)} en intereses
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+          </>
+          )}
+        </>
+      ) : (
+        <>
+          <Text style={styles.label}>Desde la cuota que vence</Text>
+          <FechaInput value={desde} onChange={setDesde} />
+          <View style={[styles.opcion, styles.opcionActiva]}>
+            <Ionicons name="repeat" size={18} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.opcionTitulo}>Va directo a capital: se suma a cada cuota y acorta el plazo</Text>
+              <Text style={styles.opcionDetalle}>
+                Cada mes pagarás {pesos(cuotaActual)} + {pesos(aNumero(valor) || 0)} de abono. {sim?.mensual ? textoSim(sim.mensual) : ""}
+              </Text>
+              {Number(deuda.abono_mensual ?? 0) > 0 && (
+                <Text style={styles.opcionDetalle}>Reemplaza el abono fijo actual de {pesos(Number(deuda.abono_mensual))}.</Text>
+              )}
+            </View>
+          </View>
+        </>
+      )}
+
+      <PrimaryButton title={frecuencia === "mensual" ? "Guardar abono mensual" : destino === "cuotas" ? "Registrar adelanto" : "Registrar abono a capital"} onPress={guardar} loading={guardando} style={{ marginTop: spacing.sm }} />
+      <PrimaryButton title="Cancelar" variant="outline" onPress={onCerrar} style={{ marginTop: spacing.sm }} />
+    </View>
+  );
+}
+
+// ---------- Aumentar el préstamo ----------
+function FormAumento({
+  deuda,
+  onCerrar,
+  registrar,
+}: {
+  deuda: DeudaConCuotas;
+  onCerrar: () => void;
+  registrar: (id: string, valor: number, fecha: string, mantiene: "cuota" | "plazo", nota?: string) => Promise<void>;
+}) {
+  const pendientes = deuda.cuotas.filter((c) => c.estado === "pendiente");
+  const proxima = pendientes[0];
+  const [valor, setValor] = useState("");
+  const [fecha, setFecha] = useState(hoyISO());
+  const [nota, setNota] = useState("");
+  const [mantiene, setMantiene] = useState<"cuota" | "plazo">("cuota");
+  const [guardando, setGuardando] = useState(false);
+  const base = cuotaBase(pendientes);
+  const cuotaActual = proxima ? Number(proxima.capital) + Number(proxima.interes) + Number(proxima.seguro ?? 0) : 0;
+
+  const sim = useMemo(() => {
+    const v = aNumero(valor);
+    if (!(v > 0) || !proxima) return null;
+    return {
+      cuota: simular(deuda, deuda.saldoActual + v, { cuotaObjetivo: base }),
+      plazo: simular(deuda, deuda.saldoActual + v, { cuotasRestantes: Math.max(1, Number(deuda.plazo_meses) - deuda.cuotasPagadas) }),
+    };
+  }, [valor, deuda]);
+
+  async function guardar() {
+    const v = aNumero(valor);
+    if (!(v > 0)) return Alert.alert("Valor no válido", "Escribe cuánto aumenta el préstamo.");
+    const elegido: any = mantiene === "cuota" ? sim?.cuota : sim?.plazo;
+    if (elegido?.error) return Alert.alert("No es posible", `${elegido.error} Elige "Mantener el plazo" o aumenta la cuota.`);
+    setGuardando(true);
+    try {
+      await registrar(deuda.id, v, fecha, mantiene, nota.trim() || undefined);
+      onCerrar();
+    } catch (e: any) {
+      Alert.alert("Error", e.message ?? "No se pudo registrar el aumento.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  const c: any = sim?.cuota;
+  const p: any = sim?.plazo;
+  return (
+    <View style={styles.abonoBox}>
+      <Text style={typography.h3}>Aumentar el préstamo</Text>
+      <Text style={styles.ayuda}>Saldo actual: {pesos(deuda.saldoActual)}. Usa esto cuando te prestan más dinero sobre este mismo crédito.</Text>
+      <Text style={styles.label}>Valor del aumento</Text>
+      <TextInput style={styles.input} placeholder="Ej. 10.000.000" placeholderTextColor={colors.textMuted} value={valor} onChangeText={setValor} keyboardType="numeric" />
+      <Text style={styles.label}>Fecha en que recibieron el dinero</Text>
+      <FechaInput value={fecha} onChange={setFecha} />
+      <TextInput style={styles.input} placeholder="Nota (opcional, ej. para el carro)" placeholderTextColor={colors.textMuted} value={nota} onChangeText={setNota} />
+
+      <TouchableOpacity style={[styles.opcion, mantiene === "cuota" && styles.opcionActiva]} onPress={() => setMantiene("cuota")}>
+        <Ionicons name={mantiene === "cuota" ? "radio-button-on" : "radio-button-off"} size={18} color={colors.primary} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.opcionTitulo}>Reducir el plazo (misma cuota, terminas antes)</Text>
-          {simulacion && (
+          <Text style={styles.opcionTitulo}>Mantener la cuota (aumenta el plazo)</Text>
+          {c && (
             <Text style={styles.opcionDetalle}>
-              Quedan {simulacion.plazo.cuotas} cuotas (antes {pendientes.length})
-              {simulacion.plazo.fin ? ` · terminas ${formatoFecha(simulacion.plazo.fin)}` : ""} · ahorras {pesos(simulacion.plazo.ahorro)} en intereses
+              {c.error
+                ? c.error
+                : `Sigues pagando ${pesos(cuotaActual)} · quedan ${c.cuotas} cuotas (antes ${pendientes.length})${c.fin ? ` · terminas ${formatoFecha(c.fin)}` : ""} · intereses adicionales ${pesos(-c.difIntereses)}`}
+            </Text>
+          )}
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.opcion, mantiene === "plazo" && styles.opcionActiva]} onPress={() => setMantiene("plazo")}>
+        <Ionicons name={mantiene === "plazo" ? "radio-button-on" : "radio-button-off"} size={18} color={colors.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.opcionTitulo}>Mantener el plazo (sube la cuota)</Text>
+          {p && !p.error && (
+            <Text style={styles.opcionDetalle}>
+              Nueva cuota {pesos(p.cuotaNueva)} (antes {pesos(cuotaActual)}){p.fin ? ` · terminas ${formatoFecha(p.fin)}` : ""} · intereses adicionales {pesos(-p.difIntereses)}
             </Text>
           )}
         </View>
       </TouchableOpacity>
 
-      <TouchableOpacity style={[styles.opcion, modalidad === "cuota" && styles.opcionActiva]} onPress={() => setModalidad("cuota")}>
-        <Ionicons name={modalidad === "cuota" ? "radio-button-on" : "radio-button-off"} size={18} color={colors.primary} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.opcionTitulo}>Reducir la cuota (mismo plazo, pagas menos al mes)</Text>
-          {simulacion && (
-            <Text style={styles.opcionDetalle}>
-              Nueva cuota {pesos(simulacion.cuota.nueva)} (antes {pesos(Number(proxima?.cuota_total ?? 0))}) · ahorras {pesos(simulacion.cuota.ahorro)} en intereses
-            </Text>
-          )}
-        </View>
-      </TouchableOpacity>
-
-      <PrimaryButton title="Registrar abono" onPress={guardar} loading={guardando} style={{ marginTop: spacing.sm }} />
+      <PrimaryButton title="Registrar aumento y recalcular" onPress={guardar} loading={guardando} style={{ marginTop: spacing.sm }} />
       <PrimaryButton title="Cancelar" variant="outline" onPress={onCerrar} style={{ marginTop: spacing.sm }} />
     </View>
   );
@@ -521,7 +878,7 @@ const styles = StyleSheet.create({
   inputError: { borderWidth: 1, borderColor: colors.danger },
   fila: { flexDirection: "row", alignItems: "center", gap: 8 },
   sufijo: { fontSize: 15, color: colors.textSecondary, marginBottom: spacing.sm },
-  chips: { flexDirection: "row", gap: 8, marginBottom: 4 },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 4 },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.background },
   chipActivo: { backgroundColor: colors.primary },
   chipTexto: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
@@ -550,6 +907,10 @@ const styles = StyleSheet.create({
   pillText: { fontSize: 10, fontWeight: "700" },
   pillTextWarning: { color: colors.warning },
   pillTextSuccess: { color: colors.success },
+  parcial: { fontSize: 11, color: colors.warning, fontWeight: "600", marginTop: 2 },
+  fijoBox: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.md, backgroundColor: colors.primaryLight, borderRadius: radius.sm, padding: spacing.sm },
+  fijoTexto: { flex: 1, fontSize: 12, color: colors.primary, fontWeight: "600" },
+  fijoQuitar: { fontSize: 12, color: colors.danger, fontWeight: "700" },
   abonoBox: { marginTop: spacing.md, padding: spacing.md, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border },
   opcion: { flexDirection: "row", gap: 8, alignItems: "flex-start", padding: spacing.sm, borderRadius: radius.sm, marginBottom: spacing.xs },
   opcionActiva: { backgroundColor: colors.primaryLight },

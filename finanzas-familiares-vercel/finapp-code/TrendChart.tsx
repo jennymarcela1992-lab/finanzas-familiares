@@ -44,7 +44,7 @@ export default function TrendChart({ datos, mesInicial }: { datos: Punto[]; mesI
         </View>
         <View style={styles.leyendaItem}>
           <View style={[styles.cuadrito, { backgroundColor: COLOR_SALIDAS }]} />
-          <Text style={styles.leyendaTexto}>Salidas (gastos + cuotas)</Text>
+          <Text style={styles.leyendaTexto}>Salidas (gastos + créditos)</Text>
         </View>
       </View>
 

@@ -89,6 +89,7 @@ export default function DashboardScreen() {
     try {
       const esUsuarioActual = usuario?.user_metadata?.nombre === nombrePersona || usuario?.email === nombrePersona;
       await definirAporte(nombrePersona, aNumero(nuevoAporte), esUsuarioActual ? usuario?.id : undefined);
+      await recargar();
       setEditandoAporte(null);
       setNuevoAporte("");
     } catch (e: any) {
@@ -155,8 +156,8 @@ export default function DashboardScreen() {
   if (errorDatos || !datos) return <Text style={styles.errorText}>Error cargando el resumen: {errorDatos}</Text>;
 
   const { actual, anterior } = datos;
-  const salidas = actual.gastos + actual.cuotas;
-  const salidasAnt = anterior.gastos + anterior.cuotas;
+  const salidas = actual.salidas;
+  const salidasAnt = anterior.salidas;
   const varEntradas = variacion(actual.ingresos, anterior.ingresos, anterior.mes);
   const varSalidas = variacion(salidas, salidasAnt, anterior.mes);
   const quedo = actual.balance;
@@ -211,11 +212,15 @@ export default function DashboardScreen() {
         </View>
 
         <View style={styles.heroDesglose}>
-          <Desglose texto="Nómina (neto)" valor={actual.nomina} />
+          <Desglose texto={`Aportes (${datos.aportesPersonas.length} persona${datos.aportesPersonas.length === 1 ? "" : "s"})`} valor={actual.aportes} />
           {actual.arriendos > 0 && <Desglose texto="Arriendos" valor={actual.arriendos} />}
-          {actual.vehiculo > 0 && <Desglose texto="Vehículo" valor={actual.vehiculo} />}
+          {actual.vehiculo > 0 && <Desglose texto="Carro rentado" valor={actual.vehiculo} />}
+          {actual.inversiones > 0 && <Desglose texto="Inversiones en conjunto" valor={actual.inversiones} />}
+          {actual.prestamosCobrados > 0 && <Desglose texto="Préstamos (abonos recibidos)" valor={actual.prestamosCobrados} />}
+          {actual.desembolsos > 0 && <Desglose texto="Aumentos de créditos recibidos" valor={actual.desembolsos} />}
           <Desglose texto="Gastos registrados" valor={-actual.gastos} />
-          {actual.cuotas > 0 && <Desglose texto="Cuotas de créditos" valor={-actual.cuotas} />}
+          {actual.cuotas > 0 && <Desglose texto="Pagos de créditos" valor={-actual.cuotas} />}
+          {actual.otrasSalidas > 0 && <Desglose texto="Inversiones y préstamos entregados" valor={-actual.otrasSalidas} />}
         </View>
       </Card>
 
@@ -239,7 +244,7 @@ export default function DashboardScreen() {
       {/* ---------- 3. Tendencia ---------- */}
       <Card>
         <Text style={[typography.h3, { marginBottom: spacing.sm }]}>Últimos 6 meses</Text>
-        <TrendChart key={mes} datos={datos.meses.map((m) => ({ mes: m.mes, entradas: m.ingresos, salidas: m.gastos + m.cuotas }))} />
+        <TrendChart key={mes} datos={datos.meses.map((m) => ({ mes: m.mes, entradas: m.ingresos, salidas: m.salidas }))} />
       </Card>
 
       {/* ---------- 4. Gastos por rubro ---------- */}

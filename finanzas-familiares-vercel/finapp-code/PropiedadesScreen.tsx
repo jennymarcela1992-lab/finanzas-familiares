@@ -8,10 +8,28 @@ import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
+import { formatoFecha, pesos } from "../../utils/amortizacion";
 
 export default function PropiedadesScreen() {
   const { propiedades, cargando, error, crearPropiedad, registrarArriendoRecibido } = usePropiedades();
-  const { deudas } = useDeudas();
+  const { deudas, recargar: recargarDeudas } = useDeudas();
+  const [destino, setDestino] = useState<string | null>(null); // id del crédito al que va el arriendo
+  const [valorDestino, setValorDestino] = useState("");
+  const deudasConCuotas = deudas.filter((d) => d.proximaCuota);
+  const deudaDestino = deudas.find((d) => d.id === destino);
+
+  function abrirArriendo(p: PropiedadConDetalle) {
+    setPropSeleccionada(p);
+    setMontoArriendo(Math.round(Number(p.valor_arriendo)).toLocaleString("es-CO"));
+    const credito = deudas.find((d) => d.id === p.credito_id && d.proximaCuota);
+    elegirDestino(credito?.id ?? null, Number(p.valor_arriendo));
+  }
+
+  function elegirDestino(id: string | null, monto = aNumero(montoArriendo) || 0) {
+    setDestino(id);
+    const d = deudas.find((x) => x.id === id);
+    setValorDestino(d ? Math.min(monto, d.restanteProxima).toLocaleString("es-CO") : "");
+  }
 
   const [mostrarForm, setMostrarForm] = useState(false);
   const [nombre, setNombre] = useState("");
@@ -43,10 +61,23 @@ export default function PropiedadesScreen() {
 
   async function manejarRegistrarArriendo() {
     if (!propSeleccionada || !montoArriendo.trim()) return;
+    const monto = aNumero(montoArriendo);
+    const valorCredito = destino ? aNumero(valorDestino) : 0;
+    if (destino && !(valorCredito > 0)) {
+      Alert.alert("Falta el valor", "Escribe cuánto del arriendo va para el crédito.");
+      return;
+    }
+    if (valorCredito > monto) {
+      Alert.alert("Valor no válido", "Lo que va al crédito no puede ser mayor que el arriendo recibido.");
+      return;
+    }
     setGuardando(true);
     try {
-      await registrarArriendoRecibido(propSeleccionada.id, aNumero(montoArriendo));
+      await registrarArriendoRecibido(propSeleccionada.id, monto, destino ? { destino: { deudaId: destino, valor: valorCredito } } : {});
+      if (destino) await recargarDeudas();
       setMontoArriendo("");
+      setDestino(null);
+      setValorDestino("");
       setPropSeleccionada(null);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo registrar el arriendo.");
@@ -92,7 +123,7 @@ export default function PropiedadesScreen() {
           contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
           ListEmptyComponent={<Text style={styles.empty}>Todavía no hay propiedades registradas.</Text>}
           renderItem={({ item: p }) => (
-            <TouchableOpacity onPress={() => setPropSeleccionada(p)} activeOpacity={0.85}>
+            <TouchableOpacity onPress={() => abrirArriendo(p)} activeOpacity={0.85}>
               <Card>
                 <View style={styles.rowStart}>
                   <View style={styles.iconoCircle}>
@@ -125,7 +156,36 @@ export default function PropiedadesScreen() {
         <View style={styles.modalFondo}>
           <View style={styles.modalCaja}>
             <Text style={typography.h2}>Arriendo recibido: {propSeleccionada?.nombre}</Text>
+            <Text style={[styles.label, { marginTop: spacing.md }]}>Monto recibido</Text>
             <TextInput style={styles.input} placeholder="Monto recibido" placeholderTextColor={colors.textMuted} value={montoArriendo} onChangeText={setMontoArriendo} keyboardType="numeric" />
+
+            <Text style={styles.label}>¿A dónde va este dinero?</Text>
+            <View style={styles.chipsRow}>
+              <TouchableOpacity style={[styles.chip, destino === null && styles.chipActivo]} onPress={() => elegirDestino(null)}>
+                <Text style={[styles.chipText, destino === null && styles.chipTextActivo]}>Queda disponible</Text>
+              </TouchableOpacity>
+              {deudasConCuotas.map((d) => (
+                <TouchableOpacity key={d.id} style={[styles.chip, destino === d.id && styles.chipActivo]} onPress={() => elegirDestino(d.id)}>
+                  <Text style={[styles.chipText, destino === d.id && styles.chipTextActivo]}>Pagar {d.nombre}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {deudaDestino?.proximaCuota && (
+              <View style={styles.destinoBox}>
+                <Text style={styles.destinoInfo}>
+                  Cuota #{deudaDestino.proximaCuota.numero_cuota} vence {formatoFecha(deudaDestino.proximaCuota.fecha_vencimiento)} · falta {pesos(deudaDestino.restanteProxima)}
+                  {deudaDestino.entidad_pago ? ` · se paga en ${deudaDestino.entidad_pago}` : ""}
+                  {deudaDestino.numero_cuenta ? ` (${deudaDestino.numero_cuenta})` : ""}
+                </Text>
+                <Text style={styles.label}>Valor que va al crédito</Text>
+                <TextInput style={styles.input} value={valorDestino} onChangeText={setValorDestino} keyboardType="numeric" placeholder="Valor para la cuota" placeholderTextColor={colors.textMuted} />
+                {aNumero(montoArriendo) > aNumero(valorDestino) && aNumero(valorDestino) > 0 && (
+                  <Text style={styles.destinoInfo}>Quedan disponibles {pesos(aNumero(montoArriendo) - aNumero(valorDestino))}</Text>
+                )}
+              </View>
+            )}
+
             <PrimaryButton title="Guardar" onPress={manejarRegistrarArriendo} loading={guardando} />
             <TouchableOpacity onPress={() => setPropSeleccionada(null)} style={{ marginTop: spacing.md }}>
               <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
@@ -154,6 +214,8 @@ const styles = StyleSheet.create({
   hint: { fontSize: 11, color: colors.textMuted, marginTop: 4 },
   empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
   errorText: { color: colors.danger, padding: spacing.lg },
+  destinoBox: { backgroundColor: colors.primaryLight, borderRadius: radius.sm, padding: spacing.sm, marginBottom: spacing.md },
+  destinoInfo: { fontSize: 12, color: colors.primary, marginBottom: spacing.sm },
   modalFondo: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: spacing.xl },
   modalCaja: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
 });
