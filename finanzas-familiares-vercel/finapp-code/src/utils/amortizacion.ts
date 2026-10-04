@@ -166,3 +166,79 @@ export function vistaPrevia(valor: number, tasa: number, tipo: TipoTasa, plazo: 
   const totalIntereses = cuota * plazo - valor;
   return { iMensual: i, cuotaSinSeguro: cuota, cuotaConSeguro: cuota + Math.round(seguro || 0), totalIntereses };
 }
+
+// ---------- Proyección con eventos en el tiempo (aumentos y abonos con fecha) ----------
+
+export interface EventoCredito {
+  fecha: string; // AAAA-MM-DD
+  delta: number; // + aumento del préstamo, − abono a capital
+  modo: "mantener_cuota" | "recalcular_cuota"; // recalcular = mantener la fecha final y cambiar la cuota
+}
+
+/**
+ * Genera las cuotas desde `numeroInicial`, aplicando cada evento antes de la primera cuota que vence en o después de su fecha.
+ *  - Si `cuotaInicio` viene, se arranca con esa cuota (capital + interés); si no, se calcula para `cuotasRestantes`.
+ *  - "mantener_cuota": la cuota no cambia y el plazo se ajusta solo.
+ *  - "recalcular_cuota": se mantiene la fecha final vigente y se recalcula la cuota.
+ */
+export function proyectarCuotas(p: {
+  saldoInicio: number;
+  iMensual: number;
+  seguroMensual: number;
+  fechaPrimerPago: string;
+  diaPago?: number | null;
+  numeroInicial: number;
+  cuotaInicio?: number | null;
+  cuotasRestantes?: number;
+  eventos?: EventoCredito[];
+  abonoMensual?: number;
+  abonoDesde?: string | null;
+}): { filas: FilaCuota[]; cuotasPlanInicial: number } {
+  const i = p.iMensual;
+  let saldo = Math.round(p.saldoInicio);
+  const eventos = [...(p.eventos ?? [])].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  let e = 0;
+  let cuota: number;
+  let cierre: number | null; // número de la última cuota cuando el plazo está fijo
+  if (p.cuotaInicio && p.cuotaInicio > 0) {
+    cuota = Math.round(p.cuotaInicio);
+    cierre = null;
+  } else {
+    const n = Math.max(1, Math.round(p.cuotasRestantes ?? 1));
+    cuota = Math.round(cuotaFija(saldo, i, n));
+    cierre = p.numeroInicial - 1 + n;
+  }
+  // plazo del plan con el que se arranca (sin eventos futuros ni abonos fijos): sirve como referencia para recalcular
+  const cuotasPlanInicial = saldo > 0 ? (cierre !== null ? cierre - p.numeroInicial + 1 : numeroDeCuotas(saldo, i, cuota)) : 0;
+  if (!isFinite(cuotasPlanInicial)) throw new Error("La cuota no alcanza para cubrir los intereses.");
+
+  const extraMensual = Math.max(0, Math.round(p.abonoMensual || 0));
+  const filas: FilaCuota[] = [];
+  for (let k = p.numeroInicial; k < p.numeroInicial + 1200; k++) {
+    const fecha = fechaCuota(p.fechaPrimerPago, k, p.diaPago);
+    while (e < eventos.length && eventos[e].fecha <= fecha) {
+      const ev = eventos[e++];
+      const restantesAntes = cierre !== null ? cierre - k + 1 : saldo > 0 ? numeroDeCuotas(saldo, i, cuota) : 1;
+      saldo = Math.max(0, saldo + Math.round(ev.delta));
+      if (ev.modo === "recalcular_cuota" && saldo > 0) {
+        const n = Math.max(1, isFinite(restantesAntes) ? restantesAntes : 1);
+        cuota = Math.round(cuotaFija(saldo, i, n));
+        cierre = k - 1 + n;
+      } else {
+        cierre = null;
+      }
+    }
+    if (saldo <= 0) break;
+    const interes = Math.round(saldo * i);
+    if (cierre === null && cuota <= interes) throw new Error("La cuota no alcanza para cubrir los intereses.");
+    let capital = cuota - interes;
+    if ((cierre !== null && k >= cierre) || capital >= saldo) capital = saldo;
+    const aplicaExtra = extraMensual > 0 && (!p.abonoDesde || fecha >= p.abonoDesde);
+    const abono_extra = aplicaExtra ? Math.min(extraMensual, saldo - capital) : 0;
+    saldo -= capital + abono_extra;
+    const seguro = Math.round(p.seguroMensual || 0);
+    filas.push({ numero_cuota: k, fecha_vencimiento: fecha, capital, interes, seguro, abono_extra, cuota_total: capital + interes + seguro + abono_extra, saldo });
+    if (saldo <= 0) break;
+  }
+  return { filas, cuotasPlanInicial };
+}

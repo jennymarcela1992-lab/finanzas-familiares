@@ -9,7 +9,10 @@ export interface AportePersona {
 
 /** Personas del hogar (usuarios registrados) y el primer mes en que empezaron a usar la app. */
 export async function personasDelHogar(): Promise<{ personas: string[]; mesInicio: string | null }> {
-  const { data } = await supabase.from("usuarios").select("nombre, email, creado_en");
+  const [{ data }, { data: aportes }] = await Promise.all([
+    supabase.from("usuarios").select("nombre, email, creado_en"),
+    supabase.from("aportes_mes").select("usuario_nombre"),
+  ]);
   const { data: sesion } = await supabase.auth.getUser();
   const nombres = new Set<string>();
   const actual = sesion.user?.user_metadata?.nombre ?? sesion.user?.email;
@@ -21,6 +24,8 @@ export async function personasDelHogar(): Promise<{ personas: string[]; mesInici
     const m = u.creado_en ? String(u.creado_en).slice(0, 7) : null;
     if (m && (!mesInicio || m < mesInicio)) mesInicio = m;
   });
+  // personas agregadas a mano en Ingresos (no necesitan usuario en la app)
+  (aportes ?? []).forEach((a: any) => a.usuario_nombre && nombres.add(a.usuario_nombre));
   return { personas: Array.from(nombres), mesInicio };
 }
 

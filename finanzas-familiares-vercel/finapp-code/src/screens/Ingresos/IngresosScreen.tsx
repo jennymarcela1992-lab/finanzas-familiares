@@ -22,6 +22,8 @@ export default function IngresosScreen() {
   const [editando, setEditando] = useState<string | null>(null);
   const [valor, setValor] = useState("");
   const [guardando, setGuardando] = useState(false);
+  const [agregando, setAgregando] = useState(false);
+  const [nuevaPersona, setNuevaPersona] = useState("");
   const esMesActual = mes === mesHoy();
 
   async function guardarAporte(nombre: string, nuevo: number) {
@@ -83,7 +85,7 @@ export default function IngresosScreen() {
           <Card>
             <Text style={typography.h3}>Aportes de cada persona</Text>
             <Text style={styles.ayuda}>
-              Cada uno aporta {pesos(APORTE_BASE)} al mes, salvo que lo ajuste para ese mes. El ajuste solo cambia el mes que estás viendo.
+              Cada persona aporta {pesos(APORTE_BASE)} al mes (cada uno por separado), salvo que lo ajuste. El ajuste solo cambia el mes que estás viendo.
             </Text>
             {datos.aportesPersonas.length === 0 && <Text style={typography.body}>No hay personas registradas.</Text>}
             {datos.aportesPersonas.map((p) => (
@@ -139,6 +141,48 @@ export default function IngresosScreen() {
                 )}
               </View>
             ))}
+            {agregando ? (
+              <View style={styles.editarFila}>
+                <TextInput
+                  style={styles.input}
+                  value={nuevaPersona}
+                  onChangeText={setNuevaPersona}
+                  placeholder="Nombre (ej. Andrés)"
+                  placeholderTextColor={colors.textMuted}
+                  autoFocus
+                />
+                <TouchableOpacity
+                  style={styles.botonOk}
+                  disabled={guardando}
+                  onPress={async () => {
+                    const n = nuevaPersona.trim();
+                    if (!n) return;
+                    if (datos.aportesPersonas.some((p) => p.nombre.toLowerCase() === n.toLowerCase())) {
+                      return Alert.alert("Ya existe", `${n} ya está en la lista.`);
+                    }
+                    await guardarAporte(n, APORTE_BASE);
+                    setNuevaPersona("");
+                    setAgregando(false);
+                  }}
+                >
+                  <Ionicons name="checkmark" size={18} color={colors.white} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.botonCancelar} onPress={() => setAgregando(false)}>
+                  <Ionicons name="close" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={[styles.enlace, { marginTop: spacing.sm }]} onPress={() => setAgregando(true)}>
+                <Ionicons name="person-add-outline" size={14} color={colors.primary} />
+                <Text style={styles.enlaceTexto}>Agregar persona del hogar</Text>
+              </TouchableOpacity>
+            )}
+            <View style={[styles.fila, { marginTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm }]}>
+              <Text style={[styles.otraTexto, { flex: 1, fontWeight: "800" }]}>
+                Total aportes ({datos.aportesPersonas.length} persona{datos.aportesPersonas.length === 1 ? "" : "s"})
+              </Text>
+              <Text style={styles.monto}>{pesos(a.aportes)}</Text>
+            </View>
           </Card>
 
           <Card>
