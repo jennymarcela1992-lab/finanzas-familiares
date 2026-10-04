@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "Finanzas Familiares",
+    "slug": "finanzas-familiares",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": { "backgroundColor": "#1F6F5C" },
+    "assetBundlePatterns": ["**/*"],
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.tuempresa.finanzasfamiliares" },
+    "android": { "package": "com.tuempresa.finanzasfamiliares", "adaptiveIcon": { "backgroundColor": "#1F6F5C" } },
+    "web": { "bundler": "metro" }
+  }
+}
