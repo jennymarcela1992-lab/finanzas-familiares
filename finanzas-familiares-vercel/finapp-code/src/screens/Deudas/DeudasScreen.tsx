@@ -10,6 +10,7 @@ import ProgressBar from "../../components/ProgressBar";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
+import FechaInput from "../../components/FechaInput";
 import {
   TipoTasa,
   TIPOS_TASA,
@@ -215,13 +216,7 @@ export default function DeudasScreen() {
           <TextInput style={styles.input} placeholder="Ej. 85.000" placeholderTextColor={colors.textMuted} value={form.seguro} onChangeText={cambiar("seguro")} keyboardType="numeric" />
 
           <Text style={styles.label}>Fecha de la primera cuota</Text>
-          <TextInput
-            style={[styles.input, !fechaOk && form.fechaPrimerPago.length > 0 && styles.inputError]}
-            placeholder="AAAA-MM-DD (ej. 2026-11-05)"
-            placeholderTextColor={colors.textMuted}
-            value={form.fechaPrimerPago}
-            onChangeText={cambiar("fechaPrimerPago")}
-          />
+          <FechaInput value={form.fechaPrimerPago} onChange={cambiar("fechaPrimerPago")} />
           <Text style={styles.ayuda}>Las siguientes cuotas vencen el mismo día cada mes.</Text>
 
           {!editandoId && fechaEnPasado && (
@@ -488,7 +483,7 @@ function FormPago({
       <Text style={styles.label}>Valor pagado</Text>
       <TextInput style={styles.input} value={valor} onChangeText={setValor} keyboardType="numeric" placeholder="Valor" placeholderTextColor={colors.textMuted} />
       <Text style={styles.label}>Fecha del pago</Text>
-      <TextInput style={styles.input} value={fecha} onChangeText={setFecha} placeholder="AAAA-MM-DD" placeholderTextColor={colors.textMuted} />
+      <FechaInput value={fecha} onChange={setFecha} max={hoyISO()} />
       <Text style={styles.ayuda}>Queda también como gasto (rubro Créditos) a nombre de quien pagó.</Text>
       <PrimaryButton title="Guardar pago" onPress={guardar} loading={guardando} />
       <PrimaryButton title="Cancelar" variant="outline" onPress={onCerrar} style={{ marginTop: spacing.sm }} />
@@ -571,7 +566,8 @@ function FormAbono({
       <Text style={typography.h3}>Abono extra a capital</Text>
       <Text style={styles.ayuda}>Saldo actual: {pesos(deuda.saldoActual)}</Text>
       <TextInput style={styles.input} placeholder="Valor del abono (ej. 5.000.000)" placeholderTextColor={colors.textMuted} value={valor} onChangeText={setValor} keyboardType="numeric" />
-      <TextInput style={styles.input} placeholder="Fecha AAAA-MM-DD" placeholderTextColor={colors.textMuted} value={fecha} onChangeText={setFecha} />
+      <Text style={styles.label}>Fecha del abono</Text>
+      <FechaInput value={fecha} onChange={setFecha} max={hoyISO()} />
 
       <TouchableOpacity style={[styles.opcion, modalidad === "plazo" && styles.opcionActiva]} onPress={() => setModalidad("plazo")}>
         <Ionicons name={modalidad === "plazo" ? "radio-button-on" : "radio-button-off"} size={18} color={colors.primary} />

@@ -1,16 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
 import { hoyISO, sumarMeses } from "../utils/amortizacion";
+import { personasDelHogar, aportesDelMes, esDelHogar, AportePersona } from "../utils/aportes";
 
 export interface MesBalance {
   mes: string; // AAAA-MM
-  ingresos: number;
-  nomina: number;
+  ingresos: number; // aportes + arriendos + vehículo + inversiones + préstamos cobrados
+  aportes: number; // lo que cada persona aporta (base o ajustado)
   arriendos: number;
   vehiculo: number;
+  inversiones: number; // ingresos de inversiones en conjunto
+  prestamosCobrados: number; // abonos que pagan terceros a quienes les prestamos (o préstamos que nos hacen)
   gastos: number;
   cuotas: number; // pagos de créditos registrados en el mes (cuotas + abonos extra)
-  balance: number; // ingresos - gastos - cuotas
+  otrasSalidas: number; // egresos de inversiones + préstamos entregados a terceros + abonos a préstamos de terceros
+  salidas: number; // gastos + cuotas + otrasSalidas
+  balance: number; // ingresos - salidas
 }
 
 export interface PagoProximo {
@@ -38,6 +43,7 @@ export interface DatosDashboard {
   meses: MesBalance[]; // 6 meses, el último es el mes elegido
   actual: MesBalance;
   anterior: MesBalance;
+  aportesPersonas: AportePersona[]; // del mes elegido
   rubros: { etiqueta: string; valor: number }[];
   rubrosAnterior: Record<string, number>;
   proximos: PagoProximo[];
@@ -68,10 +74,15 @@ export function useDashboard(mes: string) {
     const hoy = hoyISO();
     const en30 = sumarMeses(hoy, 1);
 
-    const [rG, rN, rDed, rArr, rVeh, rPV, rCu, rDeu, rAb, rMet, rApo, rProp, rPag] = await Promise.all([
+    const [hogar, rAm, rPre, rAbP, rMov] = await Promise.all([
+      personasDelHogar(),
+      supabase.from("aportes_mes").select("mes, usuario_nombre, aporte").gte("mes", meses[0]).lte("mes", mes),
+      supabase.from("prestamos_personales").select("id, quien_presta, quien_recibe, monto, fecha"),
+      supabase.from("abonos_prestamo").select("prestamo_id, monto, fecha").gte("fecha", desde).lt("fecha", hasta),
+      supabase.from("movimientos_inversion").select("tipo, monto, fecha").gte("fecha", desde).lt("fecha", hasta),
+    ]);
+    const [rG, rArr, rVeh, rPV, rCu, rDeu, rAb, rMet, rApo, rProp, rPag] = await Promise.all([
       supabase.from("gastos").select("id, fecha, valor, valor_cop, rubro, borrado, deuda_id").gte("fecha", desde).lt("fecha", hasta),
-      supabase.from("nomina_mensual").select("id, mes, sueldo_bruto").gte("mes", meses[0]).lte("mes", mes),
-      supabase.from("deducciones_nomina").select("nomina_id, monto"),
       supabase.from("arriendos_recibidos").select("propiedad_id, mes, monto").gte("mes", meses[0]).lte("mes", mes),
       supabase.from("vehiculos").select("id, nombre, cuota_diaria"),
       supabase.from("pagos_vehiculo").select("vehiculo_id, fecha, estado, monto").gte("fecha", desde).lt("fecha", hasta),
@@ -84,7 +95,7 @@ export function useDashboard(mes: string) {
       supabase.from("pagos_deuda").select("fecha, valor, origen, gasto_id").gte("fecha", desde).lt("fecha", hasta),
     ]);
 
-    const fallo = [rG, rN, rCu, rDeu, rMet, rApo].find((r) => r.error);
+    const fallo = [rG, rCu, rDeu, rMet, rApo].find((r) => r.error);
     if (fallo?.error) {
       setError(fallo.error.message);
       setCargando(false);
@@ -92,7 +103,10 @@ export function useDashboard(mes: string) {
     }
 
     // ---------- Balance por mes ----------
-    const base = (m: string): MesBalance => ({ mes: m, ingresos: 0, nomina: 0, arriendos: 0, vehiculo: 0, gastos: 0, cuotas: 0, balance: 0 });
+    const base = (m: string): MesBalance => ({
+      mes: m, ingresos: 0, aportes: 0, arriendos: 0, vehiculo: 0, inversiones: 0, prestamosCobrados: 0,
+      gastos: 0, cuotas: 0, otrasSalidas: 0, salidas: 0, balance: 0,
+    });
     const porMes = new Map(meses.map((m) => [m, base(m)]));
 
     // Los gastos que son pagos de créditos se cuentan en "cuotas", no en gastos (para no sumarlos dos veces)
@@ -103,11 +117,42 @@ export function useDashboard(mes: string) {
       if (b) b.gastos += Number(g.valor_cop ?? g.valor);
     });
 
-    const deducciones = new Map<string, number>();
-    (rDed.data ?? []).forEach((d: any) => deducciones.set(d.nomina_id, (deducciones.get(d.nomina_id) ?? 0) + Number(d.monto)));
-    (rN.data ?? []).forEach((n: any) => {
-      const b = porMes.get(n.mes);
-      if (b) b.nomina += Number(n.sueldo_bruto) - (deducciones.get(n.id) ?? 0);
+    // Aportes de cada persona (base de $3.000.000 o el valor ajustado ese mes)
+    const filasAportes = (rAm.data ?? []) as any[];
+    const aportesPorMes = new Map(meses.map((m) => [m, aportesDelMes(m, hogar.personas, filasAportes, hogar.mesInicio)]));
+    aportesPorMes.forEach((lista, m) => (porMes.get(m)!.aportes = lista.reduce((s, a) => s + a.aporte, 0)));
+
+    // Inversiones en conjunto: ingresos suman, egresos restan
+    (rMov.error ? [] : rMov.data ?? []).forEach((mv: any) => {
+      const b = porMes.get(mesDe(mv.fecha));
+      if (!b) return;
+      if (mv.tipo === "ingreso") b.inversiones += Number(mv.monto);
+      else b.otrasSalidas += Number(mv.monto);
+    });
+
+    // Préstamos con terceros: lo que nos devuelven es entrada; lo que prestamos es salida
+    const prestamos = new Map((rPre.error ? [] : rPre.data ?? []).map((p: any) => [p.id, p]));
+    const direccion = (p: any): "prestamos" | "nos_prestan" | "interno" => {
+      const presta = esDelHogar(p.quien_presta, hogar.personas);
+      const recibe = esDelHogar(p.quien_recibe, hogar.personas);
+      if (presta && !recibe) return "prestamos";
+      if (!presta && recibe) return "nos_prestan";
+      return "interno";
+    };
+    prestamos.forEach((p: any) => {
+      const b = porMes.get(mesDe(p.fecha));
+      if (!b) return;
+      const d = direccion(p);
+      if (d === "prestamos") b.otrasSalidas += Number(p.monto);
+      if (d === "nos_prestan") b.prestamosCobrados += Number(p.monto);
+    });
+    (rAbP.error ? [] : rAbP.data ?? []).forEach((a: any) => {
+      const p = prestamos.get(a.prestamo_id);
+      const b = porMes.get(mesDe(a.fecha));
+      if (!p || !b) return;
+      const d = direccion(p);
+      if (d === "prestamos") b.prestamosCobrados += Number(a.monto);
+      if (d === "nos_prestan") b.otrasSalidas += Number(a.monto);
     });
 
     (rArr.data ?? []).forEach((a: any) => {
@@ -133,8 +178,9 @@ export function useDashboard(mes: string) {
     });
 
     porMes.forEach((b) => {
-      b.ingresos = b.nomina + b.arriendos + b.vehiculo;
-      b.balance = b.ingresos - b.gastos - b.cuotas;
+      b.ingresos = b.aportes + b.arriendos + b.vehiculo + b.inversiones + b.prestamosCobrados;
+      b.salidas = b.gastos + b.cuotas + b.otrasSalidas;
+      b.balance = b.ingresos - b.salidas;
     });
     const lista = meses.map((m) => porMes.get(m)!);
 
@@ -200,6 +246,7 @@ export function useDashboard(mes: string) {
       meses: lista,
       actual: lista[5],
       anterior: lista[4],
+      aportesPersonas: aportesPorMes.get(mes) ?? [],
       rubros: Object.entries(rubros).map(([etiqueta, valor]) => ({ etiqueta, valor })).sort((a, b) => b.valor - a.valor),
       rubrosAnterior,
       proximos,

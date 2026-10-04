@@ -191,6 +191,56 @@ export function useGastos() {
     await cargarGastos();
   }
 
+  /**
+   * Edita un gasto. Si es pago de un crédito, también actualiza el valor y la fecha del pago
+   * y vuelve a calcular qué cuotas quedan pagadas.
+   */
+  async function editarGasto(
+    id: string,
+    cambios: NuevoGasto & { quitarFoto?: boolean }
+  ) {
+    const actual = [...gastos, ...papelera].find((g) => g.id === id);
+    if (!actual) throw new Error("No se encontró el gasto.");
+    const { data: sesion } = await supabase.auth.getUser();
+    const usuario = sesion.user;
+
+    let comprobanteUrl = actual.comprobante_url;
+    if (cambios.comprobanteUri && usuario) {
+      comprobanteUrl = await subirComprobante(cambios.comprobanteUri, usuario.id);
+    } else if (cambios.quitarFoto) {
+      comprobanteUrl = null;
+    }
+
+    const valorCop = cambios.valorCop ?? cambios.valor;
+    const { error: err } = await supabase
+      .from("gastos")
+      .update({
+        fecha: cambios.fecha,
+        item: cambios.item,
+        valor: cambios.valor,
+        moneda: cambios.moneda ?? "COP",
+        valor_cop: valorCop,
+        rubro: cambios.rubro,
+        es_compartido: cambios.esCompartido,
+        nota: cambios.nota ?? null,
+        comprobante_url: comprobanteUrl,
+      })
+      .eq("id", id);
+    if (err) throw err;
+
+    // la foto anterior ya no se usa
+    if (actual.comprobante_url && actual.comprobante_url !== comprobanteUrl) {
+      await supabase.storage.from(BUCKET).remove([rutaDeComprobante(actual.comprobante_url)]);
+    }
+
+    if (actual.deuda_id) {
+      const { error: errPago } = await supabase.from("pagos_deuda").update({ valor: Math.round(valorCop), fecha: cambios.fecha }).eq("gasto_id", id);
+      if (errPago) throw new Error(`Se guardó el gasto, pero no se pudo actualizar el pago del crédito: ${errPago.message}`);
+      await reaplicarPagos(actual.deuda_id);
+    }
+    await cargarGastos();
+  }
+
   async function moverAPapelera(id: string) {
     const { data: sesion } = await supabase.auth.getUser();
     const nombre = sesion.user?.user_metadata?.nombre ?? sesion.user?.email ?? "Alguien";
@@ -244,6 +294,7 @@ export function useGastos() {
     cargando,
     error,
     agregarGasto,
+    editarGasto,
     moverAPapelera,
     restaurarGasto,
     borrarGasto,

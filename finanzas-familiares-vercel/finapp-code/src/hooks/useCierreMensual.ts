@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { personasDelHogar, aportesDelMes } from "../utils/aportes";
 
 export interface AportePersonaMes {
   usuarioId: string | null;
   usuarioNombre: string;
   aporte: number;
+  esBase: boolean; // true = usa el aporte base (no se ajustó este mes)
   pagado: number;
   saldo: number; // aporte - pagado
 }
@@ -54,18 +56,20 @@ export function useCierreMensual(mes: string = mesActual()) {
       return;
     }
 
-    // Combina las personas que tienen aporte definido con las que han pagado gastos este mes
-    const nombresUnicos = new Set<string>();
-    (aportesData ?? []).forEach((a: any) => nombresUnicos.add(a.usuario_nombre));
-    (gastosData ?? []).forEach((g: any) => g.usuario_pago_nombre && nombresUnicos.add(g.usuario_pago_nombre));
+    // Personas del hogar con su aporte del mes (base de $3.000.000 si no se ajustó) + quienes pagaron gastos
+    const hogar = await personasDelHogar();
+    const aportes = aportesDelMes(mes, hogar.personas, (aportesData ?? []) as any[], hogar.mesInicio);
+    const nombres = new Set<string>(aportes.map((a) => a.nombre));
+    (gastosData ?? []).forEach((g: any) => g.usuario_pago_nombre && nombres.add(g.usuario_pago_nombre));
 
-    const personas: AportePersonaMes[] = Array.from(nombresUnicos).map((nombre) => {
+    const personas: AportePersonaMes[] = Array.from(nombres).map((nombre) => {
       const aporteRow = (aportesData ?? []).find((a: any) => a.usuario_nombre === nombre);
+      const ap = aportes.find((a) => a.nombre === nombre);
       const pagado = (gastosData ?? [])
         .filter((g: any) => g.usuario_pago_nombre === nombre)
         .reduce((s: number, g: any) => s + Number(g.valor_cop ?? g.valor), 0);
-      const aporte = aporteRow ? Number(aporteRow.aporte) : 0;
-      return { usuarioId: aporteRow?.usuario_id ?? null, usuarioNombre: nombre, aporte, pagado, saldo: aporte - pagado };
+      const aporte = ap?.aporte ?? 0;
+      return { usuarioId: aporteRow?.usuario_id ?? null, usuarioNombre: nombre, aporte, esBase: ap?.esBase ?? false, pagado, saldo: aporte - pagado };
     });
 
     const totalAportes = personas.reduce((s, p) => s + p.aporte, 0);

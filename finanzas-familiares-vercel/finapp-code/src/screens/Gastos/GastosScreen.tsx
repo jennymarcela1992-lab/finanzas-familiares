@@ -1,14 +1,14 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, Alert, Platform, Image, Modal, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useGastos, GastoRow } from "../../hooks/useGastos";
 import { useTasasCambio } from "../../hooks/useTasasCambio";
 import { useDeudas } from "../../hooks/useDeudas";
-import { formatoFecha, pesos } from "../../utils/amortizacion";
+import { formatoFecha, pesos, hoyISO } from "../../utils/amortizacion";
+import FechaInput from "../../components/FechaInput";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
@@ -27,7 +27,7 @@ const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function GastosScreen() {
-  const { gastos, papelera, cargando, error, agregarGasto, moverAPapelera, restaurarGasto, borrarGasto, generarCSV } = useGastos();
+  const { gastos, papelera, cargando, error, agregarGasto, editarGasto, moverAPapelera, restaurarGasto, borrarGasto, generarCSV } = useGastos();
   const { tasas, convertirACOP } = useTasasCambio();
   const { deudas, recargar: recargarDeudas } = useDeudas();
   const [esPagoCredito, setEsPagoCredito] = useState(false);
@@ -52,14 +52,53 @@ export default function GastosScreen() {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [item, setItem] = useState("");
   const [valor, setValor] = useState("");
-  const [fecha, setFecha] = useState(new Date());
-  const [mostrarFecha, setMostrarFecha] = useState(false);
+  const [fecha, setFecha] = useState(hoyISO());
+  const [editando, setEditando] = useState<GastoRow | null>(null);
+  const [fotoActual, setFotoActual] = useState<string | null>(null); // foto ya guardada (al editar)
   const [rubro, setRubro] = useState(RUBROS[0]);
   const [esCompartido, setEsCompartido] = useState(true);
   const [nota, setNota] = useState("");
   const [comprobanteUri, setComprobanteUri] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+
+  function limpiarFormulario() {
+    setItem("");
+    setValor("");
+    setNota("");
+    setFecha(hoyISO());
+    setRubro(RUBROS[0]);
+    setEsCompartido(true);
+    setComprobanteUri(null);
+    setFotoActual(null);
+    setMoneda("COP");
+    setEsPagoCredito(false);
+    setDeudaElegida(null);
+    setEditando(null);
+  }
+
+  function abrirNuevo() {
+    if (mostrarForm && !editando) {
+      setMostrarForm(false);
+      return;
+    }
+    limpiarFormulario();
+    setMostrarForm(true);
+  }
+
+  function abrirEdicion(g: GastoRow) {
+    limpiarFormulario();
+    setEditando(g);
+    setItem(g.item);
+    setValor(Number(g.valor).toLocaleString("es-CO"));
+    setMoneda(g.moneda || "COP");
+    setFecha(String(g.fecha).slice(0, 10));
+    setRubro(g.rubro && RUBROS.includes(g.rubro) ? g.rubro : "Otro");
+    setEsCompartido(!!g.es_compartido);
+    setNota(g.nota ?? "");
+    setFotoActual(g.comprobante_ver ?? null);
+    setMostrarForm(true);
+  }
 
   async function elegirFoto(origen: "camara" | "galeria") {
     const opciones = { mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.6 };
@@ -98,8 +137,8 @@ export default function GastosScreen() {
     }
     setGuardando(true);
     try {
-      await agregarGasto({
-        fecha: fecha.toISOString().slice(0, 10),
+      const datos = {
+        fecha,
         item: item.trim(),
         valor: aNumero(valor),
         rubro,
@@ -109,16 +148,15 @@ export default function GastosScreen() {
         deudaId: esPagoCredito && deudaElegida ? deudaElegida : undefined,
         moneda,
         valorCop: convertirACOP(aNumero(valor), moneda),
-      });
-      setItem("");
-      setValor("");
-      setNota("");
-      setFecha(new Date());
-      setComprobanteUri(null);
-      setMoneda("COP");
-      if (esPagoCredito) recargarDeudas();
-      setEsPagoCredito(false);
-      setDeudaElegida(null);
+      };
+      if (editando) {
+        await editarGasto(editando.id, { ...datos, quitarFoto: !fotoActual && !comprobanteUri && !!editando.comprobante_url });
+        if (editando.deuda_id) recargarDeudas();
+      } else {
+        await agregarGasto(datos);
+        if (esPagoCredito) recargarDeudas();
+      }
+      limpiarFormulario();
       setMostrarForm(false);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo guardar el gasto.");
@@ -178,7 +216,7 @@ export default function GastosScreen() {
 
   return (
     <View style={styles.container}>
-      <ScreenHeader title="Gastos" subtitle={`$${totalMes.toLocaleString("es-CO")} registrados`} actionLabel="Nuevo" onAction={() => setMostrarForm(!mostrarForm)} actionActive={mostrarForm} />
+      <ScreenHeader title="Gastos" subtitle={`$${totalMes.toLocaleString("es-CO")} registrados`} actionLabel="Nuevo" onAction={abrirNuevo} actionActive={mostrarForm && !editando} />
 
       <View style={styles.filtrosRow}>
         <View style={styles.buscadorWrap}>
@@ -209,6 +247,15 @@ export default function GastosScreen() {
       {mostrarForm && (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xxl }} keyboardShouldPersistTaps="handled">
         <Card style={styles.formCard}>
+          <Text style={[typography.h3, { marginBottom: spacing.sm }]}>{editando ? "Editar gasto" : "Nuevo gasto"}</Text>
+          {editando?.deuda_id && (
+            <View style={styles.creditoBox}>
+              <Text style={styles.creditoInfo}>
+                Este gasto es el pago de {deudas.find((d) => d.id === editando.deuda_id)?.nombre ?? "un crédito"}. Si cambias el valor o la fecha, el pago del crédito se actualiza.
+              </Text>
+            </View>
+          )}
+          {!editando && (
           <View style={styles.switchRow}>
             <Text style={typography.body}>¿Es pago de un crédito?</Text>
             <Switch
@@ -220,7 +267,8 @@ export default function GastosScreen() {
               trackColor={{ true: colors.primary }}
             />
           </View>
-          {esPagoCredito && (
+          )}
+          {!editando && esPagoCredito && (
             <View style={styles.creditoBox}>
               {deudasConCuotas.length === 0 ? (
                 <Text style={typography.caption}>No hay créditos con cuotas pendientes. Créalos en Deudas y créditos.</Text>
@@ -259,22 +307,8 @@ export default function GastosScreen() {
             <Text style={styles.conversionTexto}>≈ ${convertirACOP(aNumero(valor) || 0, moneda).toLocaleString("es-CO")} COP</Text>
           )}
 
-          <TouchableOpacity style={styles.fechaBoton} onPress={() => setMostrarFecha(true)}>
-            <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-            <Text style={styles.fechaTexto}>{fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" })}</Text>
-          </TouchableOpacity>
-          {mostrarFecha && (
-            <DateTimePicker
-              value={fecha}
-              mode="date"
-              display={Platform.OS === "ios" ? "spinner" : "default"}
-              maximumDate={new Date()}
-              onChange={(_event, seleccionada) => {
-                setMostrarFecha(Platform.OS === "ios");
-                if (seleccionada) setFecha(seleccionada);
-              }}
-            />
-          )}
+          <Text style={styles.label}>Fecha del gasto</Text>
+          <FechaInput value={fecha} onChange={setFecha} max={hoyISO()} />
 
           <Text style={styles.label}>Rubro</Text>
           <View style={styles.chipsRow}>
@@ -293,7 +327,15 @@ export default function GastosScreen() {
 
           <TextInput style={styles.input} placeholder="Nota (opcional)" placeholderTextColor={colors.textMuted} value={nota} onChangeText={setNota} />
 
-          {comprobanteUri ? (
+          {!comprobanteUri && fotoActual ? (
+            <View style={styles.previewFila}>
+              <Image source={{ uri: fotoActual }} style={styles.previewImagen} />
+              <TouchableOpacity onPress={() => setFotoActual(null)} style={styles.quitarFotoBoton}>
+                <Ionicons name="trash" size={14} color={colors.danger} />
+                <Text style={styles.quitarFotoTexto}>Quitar foto</Text>
+              </TouchableOpacity>
+            </View>
+          ) : comprobanteUri ? (
             <View style={styles.previewFila}>
               <Image source={{ uri: comprobanteUri }} style={styles.previewImagen} />
               <TouchableOpacity onPress={() => setComprobanteUri(null)} style={styles.quitarFotoBoton}>
@@ -314,7 +356,40 @@ export default function GastosScreen() {
             </View>
           )}
 
-          <PrimaryButton title="Guardar gasto" onPress={manejarGuardar} loading={guardando} style={{ marginTop: spacing.sm }} />
+          <PrimaryButton title={editando ? "Guardar cambios" : "Guardar gasto"} onPress={manejarGuardar} loading={guardando} style={{ marginTop: spacing.sm }} />
+          <PrimaryButton
+            title="Cancelar"
+            variant="outline"
+            onPress={() => {
+              limpiarFormulario();
+              setMostrarForm(false);
+            }}
+            style={{ marginTop: spacing.sm }}
+          />
+          {editando && (
+            <TouchableOpacity
+              style={styles.borrarEnlace}
+              onPress={() => {
+                const g = editando;
+                Alert.alert("Eliminar gasto", `¿Mover "${g.item}" a la papelera?`, [
+                  { text: "Cancelar", style: "cancel" },
+                  {
+                    text: "Eliminar",
+                    style: "destructive",
+                    onPress: async () => {
+                      await moverAPapelera(g.id);
+                      if (g.deuda_id) recargarDeudas();
+                      limpiarFormulario();
+                      setMostrarForm(false);
+                    },
+                  },
+                ]);
+              }}
+            >
+              <Ionicons name="trash-outline" size={15} color={colors.danger} />
+              <Text style={styles.borrarTexto}>Mover a la papelera</Text>
+            </TouchableOpacity>
+          )}
         </Card>
         </ScrollView>
       )}
@@ -328,9 +403,18 @@ export default function GastosScreen() {
           data={listaFiltrada}
           keyExtractor={(g) => g.id}
           contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
+          ListHeaderComponent={
+            listaFiltrada.length > 0 ? (
+              <Text style={styles.pista}>{verPapelera ? "Mantén presionado para borrar definitivamente." : "Toca un gasto para editarlo · mantén presionado para enviarlo a la papelera."}</Text>
+            ) : null
+          }
           ListEmptyComponent={<Text style={styles.empty}>{verPapelera ? "La papelera está vacía." : "Todavía no hay gastos registrados."}</Text>}
           renderItem={({ item: g }) => (
-            <TouchableOpacity onLongPress={() => (verPapelera ? confirmarBorradoDefinitivo(g) : confirmarBorrado(g))} activeOpacity={0.8}>
+            <TouchableOpacity
+              onPress={() => (verPapelera ? undefined : abrirEdicion(g))}
+              onLongPress={() => (verPapelera ? confirmarBorradoDefinitivo(g) : confirmarBorrado(g))}
+              activeOpacity={0.8}
+            >
               <Card style={styles.gastoCard}>
                 <View style={styles.iconoRubro}>
                   <Ionicons name={ICONO_RUBRO[g.rubro ?? "Otro"] ?? "pricetag"} size={18} color={colors.primary} />
@@ -393,6 +477,9 @@ const styles = StyleSheet.create({
   chipActivo: { backgroundColor: colors.primary },
   chipText: { color: colors.primary, fontSize: 12, fontWeight: "600" },
   chipTextActivo: { color: colors.white },
+  pista: { fontSize: 11, color: colors.textMuted, marginBottom: spacing.sm },
+  borrarEnlace: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.md },
+  borrarTexto: { color: colors.danger, fontSize: 13, fontWeight: "600" },
   creditoBox: { backgroundColor: colors.primaryLight, borderRadius: radius.sm, padding: spacing.sm, marginBottom: spacing.sm },
   creditoInfo: { fontSize: 12, color: colors.primary },
   creditoBadge: { fontSize: 11, color: colors.primary, fontWeight: "700", marginTop: 2 },
