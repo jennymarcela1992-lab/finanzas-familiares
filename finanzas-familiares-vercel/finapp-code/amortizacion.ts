@@ -1,0 +1,156 @@
+// Cálculos de créditos con cuota fija (sistema francés), como los usan los bancos en Colombia.
+// Todo es puro (sin base de datos) para poder probarlo y reutilizarlo en la pantalla.
+
+export type TipoTasa = "EA" | "MV" | "NAMV";
+
+export const TIPOS_TASA: { valor: TipoTasa; etiqueta: string; ayuda: string }[] = [
+  { valor: "EA", etiqueta: "E.A.", ayuda: "Efectiva anual (la más común en el extracto, ej. 24,5%)" },
+  { valor: "MV", etiqueta: "M.V.", ayuda: "Mensual vencida (ej. 1,8%)" },
+  { valor: "NAMV", etiqueta: "N.A.M.V.", ayuda: "Nominal anual mes vencido (ej. 22%)" },
+];
+
+/** Convierte la tasa que da el banco a tasa mensual (en decimal, ej. 0.018). */
+export function tasaMensual(tasa: number, tipo: TipoTasa): number {
+  const t = tasa / 100;
+  if (tipo === "EA") return Math.pow(1 + t, 1 / 12) - 1;
+  if (tipo === "NAMV") return t / 12;
+  return t;
+}
+
+/** Cuota fija de capital + interés (sin seguros). */
+export function cuotaFija(saldo: number, iMensual: number, numeroCuotas: number): number {
+  if (numeroCuotas <= 0) return 0;
+  if (iMensual === 0) return saldo / numeroCuotas;
+  const f = Math.pow(1 + iMensual, numeroCuotas);
+  return (saldo * iMensual * f) / (f - 1);
+}
+
+/** Cuántas cuotas hacen falta para pagar `saldo` pagando `cuota` (capital + interés) cada mes. */
+export function numeroDeCuotas(saldo: number, iMensual: number, cuota: number): number {
+  if (saldo <= 0) return 0;
+  if (iMensual === 0) return Math.ceil(saldo / cuota);
+  const base = 1 - (iMensual * saldo) / cuota;
+  if (base <= 0) return Infinity; // la cuota no alcanza ni para los intereses
+  return Math.ceil(-Math.log(base) / Math.log(1 + iMensual) - 1e-9);
+}
+
+// ---------- Fechas (como texto AAAA-MM-DD, para que la zona horaria no corra los días) ----------
+
+export function hoyISO(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${dia}`;
+}
+
+export function esFechaValida(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [a, m, d] = s.split("-").map(Number);
+  return m >= 1 && m <= 12 && d >= 1 && d <= diasDelMes(a, m);
+}
+
+function diasDelMes(anio: number, mes: number): number {
+  return new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+}
+
+/**
+ * Fecha de la cuota número `n` (1 = primer pago). Mantiene el día de pago y,
+ * si el mes no tiene ese día (ej. 31 en febrero), usa el último día del mes.
+ */
+export function fechaCuota(fechaPrimerPago: string, n: number, diaPago?: number | null): string {
+  const [a, m, d] = fechaPrimerPago.split("-").map(Number);
+  const dia = diaPago && diaPago >= 1 && diaPago <= 31 ? diaPago : d;
+  const total = (m - 1) + (n - 1);
+  const anio = a + Math.floor(total / 12);
+  const mes = (((total % 12) + 12) % 12) + 1;
+  const diaReal = Math.min(dia, diasDelMes(anio, mes));
+  return `${anio}-${String(mes).padStart(2, "0")}-${String(diaReal).padStart(2, "0")}`;
+}
+
+/** Suma meses a una fecha AAAA-MM-DD (para créditos viejos que no guardaban el primer pago). */
+export function sumarMeses(fecha: string, meses: number): string {
+  return fechaCuota(fecha, meses + 1);
+}
+
+export function formatoFecha(iso: string): string {
+  const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const [a, m, d] = iso.split("-").map(Number);
+  return `${d} ${MESES[m - 1]} ${a}`;
+}
+
+export function pesos(n: number): string {
+  return "$" + Math.round(n).toLocaleString("es-CO");
+}
+
+// ---------- Tabla de amortización ----------
+
+export interface FilaCuota {
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  capital: number;
+  interes: number;
+  seguro: number;
+  cuota_total: number; // capital + interés + seguro
+  saldo: number; // saldo después de pagar esta cuota
+}
+
+/**
+ * Genera las cuotas a partir de un saldo.
+ * - `numeroInicial`: número de la primera cuota que se genera (para continuar después de las pagadas).
+ * - `cuotasRestantes`: cuántas cuotas quedan (se calcula la cuota fija), o
+ * - `cuotaObjetivo`: una cuota fija de capital+interés ya conocida (se calcula cuántas cuotas faltan).
+ */
+export function generarCuotas(params: {
+  saldo: number;
+  iMensual: number;
+  seguroMensual: number;
+  fechaPrimerPago: string;
+  diaPago?: number | null;
+  numeroInicial: number;
+  cuotasRestantes?: number;
+  cuotaObjetivo?: number;
+}): FilaCuota[] {
+  const { iMensual, seguroMensual, fechaPrimerPago, diaPago, numeroInicial } = params;
+  let saldo = Math.round(params.saldo);
+  if (saldo <= 0) return [];
+
+  let n: number;
+  let cuota: number;
+  if (params.cuotaObjetivo && params.cuotaObjetivo > 0) {
+    cuota = Math.round(params.cuotaObjetivo);
+    n = numeroDeCuotas(saldo, iMensual, cuota);
+    if (!isFinite(n)) throw new Error("La cuota no alcanza para cubrir los intereses.");
+  } else {
+    n = Math.max(1, Math.round(params.cuotasRestantes ?? 1));
+    cuota = Math.round(cuotaFija(saldo, iMensual, n));
+  }
+
+  const filas: FilaCuota[] = [];
+  for (let k = 0; k < n && saldo > 0; k++) {
+    const numero = numeroInicial + k;
+    const interes = Math.round(saldo * iMensual);
+    const ultima = k === n - 1;
+    let capital = cuota - interes;
+    if (ultima || capital >= saldo) capital = saldo; // la última cuota cierra el saldo exacto
+    saldo = saldo - capital;
+    const seguro = Math.round(seguroMensual || 0);
+    filas.push({
+      numero_cuota: numero,
+      fecha_vencimiento: fechaCuota(fechaPrimerPago, numero, diaPago),
+      capital,
+      interes,
+      seguro,
+      cuota_total: capital + interes + seguro,
+      saldo,
+    });
+  }
+  return filas;
+}
+
+/** Resumen rápido para mostrar en el formulario antes de guardar. */
+export function vistaPrevia(valor: number, tasa: number, tipo: TipoTasa, plazo: number, seguro: number) {
+  const i = tasaMensual(tasa, tipo);
+  const cuota = Math.round(cuotaFija(valor, i, plazo));
+  const totalIntereses = cuota * plazo - valor;
+  return { iMensual: i, cuotaSinSeguro: cuota, cuotaConSeguro: cuota + Math.round(seguro || 0), totalIntereses };
+}
