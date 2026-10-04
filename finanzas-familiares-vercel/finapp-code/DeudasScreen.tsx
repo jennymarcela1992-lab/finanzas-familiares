@@ -11,6 +11,7 @@ import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
 import FechaInput from "../../components/FechaInput";
+import TablaAmortizacion from "../../components/TablaAmortizacion";
 import {
   TipoTasa,
   TIPOS_TASA,
@@ -50,6 +51,8 @@ export default function DeudasScreen() {
     eliminarAbono,
     registrarDesembolso,
     eliminarDesembolso,
+    marcarPagadasHasta,
+    deshacerYaPagadas,
     definirAbonoMensual,
   } = useDeudas();
 
@@ -62,10 +65,13 @@ export default function DeudasScreen() {
   const [abonoEn, setAbonoEn] = useState<string | null>(null);
   const [pagoEn, setPagoEn] = useState<string | null>(null);
   const [aumentoEn, setAumentoEn] = useState<string | null>(null);
-  const abrirPanel = (panel: "pago" | "abono" | "aumento", id: string) => {
+  const [vista, setVista] = useState<"tabla" | "lista">("tabla");
+  const [yaPagadasEn, setYaPagadasEn] = useState<string | null>(null);
+  const abrirPanel = (panel: "pago" | "abono" | "aumento" | "yaPagadas", id: string) => {
     setPagoEn(panel === "pago" && pagoEn !== id ? id : null);
     setAbonoEn(panel === "abono" && abonoEn !== id ? id : null);
     setAumentoEn(panel === "aumento" && aumentoEn !== id ? id : null);
+    setYaPagadasEn(panel === "yaPagadas" && yaPagadasEn !== id ? id : null);
   };
   const { personas, yo } = usePersonas();
 
@@ -322,12 +328,23 @@ export default function DeudasScreen() {
               )}
               {!terminada && <Accion icono="cash" texto="Abono extra" onPress={() => abrirPanel("abono", d.id)} />}
               {!terminada && <Accion icono="add-circle" texto="Aumentar préstamo" onPress={() => abrirPanel("aumento", d.id)} />}
+              {d.proximaCuota && d.proximaCuota.fecha_vencimiento < hoyISO() && (
+                <Accion icono="checkmark-done" texto="Cuotas ya pagadas" onPress={() => abrirPanel("yaPagadas", d.id)} />
+              )}
               <Accion icono="create" texto="Editar" onPress={() => abrirEdicion(d)} />
               <Accion icono="trash" texto="Eliminar" color={colors.danger} onPress={() => confirmarEliminar(d)} />
             </View>
 
             {pagoEn === d.id && <FormPago deuda={d} personas={personas} yo={yo} onCerrar={() => setPagoEn(null)} registrar={registrarPago} />}
             {abonoEn === d.id && <FormAbono deuda={d} onCerrar={() => setAbonoEn(null)} registrar={registrarAbono} definirMensual={definirAbonoMensual} registrarPago={registrarPago} personas={personas} yo={yo} />}
+            {yaPagadasEn === d.id && (
+              <FormYaPagadas
+                deuda={d}
+                onCerrar={() => setYaPagadasEn(null)}
+                marcar={marcarPagadasHasta}
+                deshacer={deshacerYaPagadas}
+              />
+            )}
             {aumentoEn === d.id && <FormAumento deuda={d} onCerrar={() => setAumentoEn(null)} registrar={registrarDesembolso} />}
             {Number(d.abono_mensual ?? 0) > 0 && (
               <View style={styles.fijoBox}>
@@ -349,8 +366,21 @@ export default function DeudasScreen() {
               </View>
             )}
 
-            <Text style={[styles.label, { marginTop: spacing.md }]}>Tabla de amortización</Text>
+            <View style={styles.vistaFila}>
+              <Text style={[styles.label, { marginTop: spacing.md, flex: 1 }]}>Tabla de amortización</Text>
+              <View style={styles.vistaChips}>
+                {(["tabla", "lista"] as const).map((v) => (
+                  <TouchableOpacity key={v} onPress={() => setVista(v)} style={[styles.vistaChip, vista === v && styles.chipActivo]}>
+                    <Ionicons name={v === "tabla" ? "grid-outline" : "list-outline"} size={13} color={vista === v ? colors.white : colors.textSecondary} />
+                    <Text style={[styles.chipTexto, { fontSize: 12 }, vista === v && styles.chipTextoActivo]}>{v === "tabla" ? "Tabla" : "Lista"}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
             <Text style={styles.ayuda}>Una cuota queda pagada cuando se registra su pago. Toca una cuota para ver el detalle.</Text>
+            {vista === "tabla" ? (
+              <TablaAmortizacion deuda={d} onTocarCuota={tocarCuota} />
+            ) : (
             <ScrollView style={{ maxHeight: 340, marginTop: spacing.xs }} nestedScrollEnabled>
               {d.cuotas.map((c) => {
                 const pagada = c.estado === "pagada";
@@ -378,6 +408,7 @@ export default function DeudasScreen() {
                 );
               })}
             </ScrollView>
+            )}
 
             {d.pagos.length > 0 && (
               <View style={{ marginTop: spacing.md }}>
@@ -781,6 +812,86 @@ function FormAbono({
   );
 }
 
+// ---------- Cuotas que ya se pagaron antes de usar la app ----------
+function ultimoDiaMesAnterior() {
+  const [a, m] = hoyISO().split("-").map(Number);
+  const d = new Date(Date.UTC(a, m - 1, 0));
+  return d.toISOString().slice(0, 10);
+}
+
+function FormYaPagadas({
+  deuda,
+  onCerrar,
+  marcar,
+  deshacer,
+}: {
+  deuda: DeudaConCuotas;
+  onCerrar: () => void;
+  marcar: (id: string, hasta: string) => Promise<number>;
+  deshacer: (id: string) => Promise<void>;
+}) {
+  const [hasta, setHasta] = useState(ultimoDiaMesAnterior());
+  const [guardando, setGuardando] = useState(false);
+  const afectadas = deuda.cuotas.filter((c) => c.estado === "pendiente" && c.fecha_vencimiento <= hasta);
+  const hayIniciales = deuda.pagos.some((p) => p.origen === "registro_inicial");
+
+  async function guardar() {
+    if (!afectadas.length) return Alert.alert("Nada que marcar", "No hay cuotas pendientes hasta esa fecha.");
+    setGuardando(true);
+    try {
+      const n = await marcar(deuda.id, hasta);
+      Alert.alert("Listo", `${n} cuota(s) quedaron como pagadas.`);
+      onCerrar();
+    } catch (e: any) {
+      Alert.alert("Error", e.message ?? "No se pudieron marcar.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <View style={styles.abonoBox}>
+      <Text style={typography.h3}>Cuotas ya pagadas</Text>
+      <Text style={styles.ayuda}>
+        Para cuotas que se pagaron antes de usar la app. Quedan como pagadas sin crear gastos ni sumar en el Resumen, así que no afectan nada más.
+      </Text>
+      <Text style={styles.label}>Marcar pagadas todas las cuotas que vencen hasta</Text>
+      <FechaInput value={hasta} onChange={setHasta} max={hoyISO()} />
+      <View style={[styles.opcion, styles.opcionActiva]}>
+        <Ionicons name="checkmark-done" size={18} color={colors.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.opcionTitulo}>
+            {afectadas.length ? `${afectadas.length} cuota(s): de la #${afectadas[0].numero_cuota} a la #${afectadas[afectadas.length - 1].numero_cuota}` : "No hay cuotas pendientes hasta esa fecha"}
+          </Text>
+          {afectadas.length > 0 && (
+            <Text style={styles.opcionDetalle}>
+              {formatoFecha(afectadas[0].fecha_vencimiento)} a {formatoFecha(afectadas[afectadas.length - 1].fecha_vencimiento)} · total {pesos(afectadas.reduce((s, c) => s + Number(c.cuota_total) - Number(c.valor_pagado ?? 0), 0))}
+            </Text>
+          )}
+        </View>
+      </View>
+      <Text style={styles.ayuda}>
+        Consejo: si el crédito tuvo aumentos o abonos en esos meses, regístralos primero (con su fecha) y luego marca las cuotas, así la tabla queda igual a la del prestamista.
+      </Text>
+      <PrimaryButton title="Marcar como pagadas" onPress={guardar} loading={guardando} />
+      {hayIniciales && (
+        <TouchableOpacity
+          style={{ marginTop: spacing.md, alignItems: "center" }}
+          onPress={() =>
+            Alert.alert("Deshacer", "¿Volver a dejar pendientes las cuotas marcadas como ya pagadas antes de la app?", [
+              { text: "Cancelar", style: "cancel" },
+              { text: "Deshacer", style: "destructive", onPress: () => deshacer(deuda.id).catch((e) => Alert.alert("Error", e.message)) },
+            ])
+          }
+        >
+          <Text style={{ color: colors.danger, fontSize: 12, fontWeight: "600" }}>Deshacer las cuotas marcadas como ya pagadas</Text>
+        </TouchableOpacity>
+      )}
+      <PrimaryButton title="Cancelar" variant="outline" onPress={onCerrar} style={{ marginTop: spacing.sm }} />
+    </View>
+  );
+}
+
 // ---------- Aumentar el préstamo ----------
 function FormAumento({
   deuda,
@@ -908,6 +1019,9 @@ const styles = StyleSheet.create({
   pillTextWarning: { color: colors.warning },
   pillTextSuccess: { color: colors.success },
   parcial: { fontSize: 11, color: colors.warning, fontWeight: "600", marginTop: 2 },
+  vistaFila: { flexDirection: "row", alignItems: "center", gap: 8 },
+  vistaChips: { flexDirection: "row", gap: 6, marginTop: spacing.md },
+  vistaChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: colors.background },
   fijoBox: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.md, backgroundColor: colors.primaryLight, borderRadius: radius.sm, padding: spacing.sm },
   fijoTexto: { flex: 1, fontSize: 12, color: colors.primary, fontWeight: "600" },
   fijoQuitar: { fontSize: 12, color: colors.danger, fontWeight: "700" },

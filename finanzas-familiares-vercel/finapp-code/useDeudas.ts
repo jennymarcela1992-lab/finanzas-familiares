@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
-import { TipoTasa, tasaMensual, generarCuotas, sumarMeses, hoyISO } from "../utils/amortizacion";
+import { TipoTasa, tasaMensual, generarCuotas, sumarMeses, hoyISO, fechaCuota, proyectarCuotas, EventoCredito } from "../utils/amortizacion";
 import { PagoDeudaRow, reaplicarPagos, registrarPagoDeuda, restanteDeCuota, nombreUsuarioActual } from "../utils/pagosDeuda";
 
 export interface CuotaRow {
@@ -192,23 +192,36 @@ export function useDeudas() {
     const pagadas = cuotas.filter((c) => c.estado === "pagada");
     const pendientes = cuotas.filter((c) => c.estado === "pendiente");
     const numeroInicial = pagadas.length ? Math.max(...pagadas.map((c) => c.numero_cuota)) + 1 : 1;
-    const saldo = saldoDe(d, cuotas, abonos, desembolsos);
     const i = tasaMensual(Number(d.tasa_interes), d.tipo_tasa ?? "MV");
+    const primerPago = primerPagoDe(d);
 
-    let cuotaObjetivo: number | undefined;
-    if (opciones.mantenerCuota && pendientes.length) {
-      // la cuota base (capital + interés) vigente: la de la próxima cuota (la última viene ajustada por redondeo)
-      cuotaObjetivo = Number(pendientes[0].capital) + Number(pendientes[0].interes);
-    }
-    const nuevas = generarCuotas({
-      saldo,
+    // Los aumentos/abonos con fecha hasta la próxima cuota ya cuentan en el saldo de arranque;
+    // los que tienen fecha posterior se aplican en el mes que corresponde (créditos con historial).
+    const corte = fechaCuota(primerPago, numeroInicial, d.dia_pago);
+    const capitalPagado = pagadas.reduce((s, c) => s + Number(c.capital) + Number(c.abono_extra ?? 0), 0);
+    const abonosAntes = abonos.filter((a) => a.fecha <= corte).reduce((s, a) => s + Number(a.valor), 0);
+    const aumentosAntes = desembolsos.filter((x) => x.fecha <= corte).reduce((s, x) => s + Number(x.valor), 0);
+    const saldoInicio = Math.max(0, Math.round(Number(d.valor_inicial) + aumentosAntes - capitalPagado - abonosAntes));
+    const eventos: EventoCredito[] = [
+      ...abonos
+        .filter((a) => a.fecha > corte)
+        .map((a) => ({ fecha: a.fecha, delta: -Number(a.valor), modo: (a.modalidad === "plazo" ? "mantener_cuota" : "recalcular_cuota") as EventoCredito["modo"] })),
+      ...desembolsos
+        .filter((x) => x.fecha > corte)
+        .map((x) => ({ fecha: x.fecha, delta: Number(x.valor), modo: (x.mantiene === "cuota" ? "mantener_cuota" : "recalcular_cuota") as EventoCredito["modo"] })),
+    ];
+
+    const cuotaActual = pendientes[0] ? Number(pendientes[0].capital) + Number(pendientes[0].interes) : null;
+    const { filas: nuevas, cuotasPlanInicial } = proyectarCuotas({
+      saldoInicio,
       iMensual: i,
       seguroMensual: Number(d.seguro_mensual ?? 0),
-      fechaPrimerPago: primerPagoDe(d),
+      fechaPrimerPago: primerPago,
       diaPago: d.dia_pago,
       numeroInicial,
-      cuotaObjetivo,
+      cuotaInicio: opciones.mantenerCuota ? cuotaActual : null,
       cuotasRestantes: Math.max(1, Number(d.plazo_meses) - pagadas.length),
+      eventos,
       abonoMensual: Number(d.abono_mensual ?? 0),
       abonoDesde: d.abono_mensual_desde,
     });
@@ -222,7 +235,7 @@ export function useDeudas() {
     await reaplicarPagos(deudaId); // vuelve a ubicar pagos parciales en las cuotas nuevas
     const { error: errPlazo } = await supabase
       .from("deudas")
-      .update({ plazo_meses: pagadas.length + (nuevas.cuotasBase ?? nuevas.length) }) // plazo de referencia, sin abonos fijos
+      .update({ plazo_meses: pagadas.length + cuotasPlanInicial }) // plazo de referencia del plan vigente (sin abonos fijos)
       .eq("id", deudaId);
     chequear(errPlazo, "No se pudo actualizar el plazo");
   }
@@ -336,6 +349,39 @@ export function useDeudas() {
     await cargar();
   }
 
+  /**
+   * Cuotas que ya se pagaron antes de usar la app: quedan pagadas como "registro inicial".
+   * No crean gastos ni cuentan en el Resumen; solo dejan la cuota como pagada.
+   */
+  async function marcarPagadasHasta(deudaId: string, fechaHasta: string) {
+    const deuda = deudas.find((d) => d.id === deudaId);
+    const objetivo = (deuda?.cuotas ?? []).filter((c) => c.estado === "pendiente" && c.fecha_vencimiento <= fechaHasta);
+    if (!objetivo.length) throw new Error("No hay cuotas pendientes hasta esa fecha.");
+    const yo = await nombreUsuarioActual();
+    const { error: err } = await supabase.from("pagos_deuda").insert(
+      objetivo.map((c) => ({
+        deuda_id: deudaId,
+        fecha: c.fecha_vencimiento,
+        valor: Math.max(1, Math.round(Number(c.cuota_total) - Number(c.valor_pagado ?? 0))),
+        origen: "registro_inicial",
+        pagado_por: "Ya pagada",
+        registrado_por: yo.nombre,
+      }))
+    );
+    chequear(err, "No se pudieron marcar las cuotas");
+    await reaplicarPagos(deudaId);
+    await cargar();
+    return objetivo.length;
+  }
+
+  /** Deshace las cuotas marcadas como "ya pagadas antes de la app" (vuelven a quedar pendientes). */
+  async function deshacerYaPagadas(deudaId: string) {
+    const { error: err } = await supabase.from("pagos_deuda").delete().eq("deuda_id", deudaId).eq("origen", "registro_inicial");
+    chequear(err, "No se pudo deshacer");
+    await reaplicarPagos(deudaId);
+    await cargar();
+  }
+
   /** Borra un pago registrado por error (y su gasto, si lo tiene). La cuota vuelve a quedar pendiente si ya no está cubierta. */
   async function eliminarPago(pago: PagoDeudaRow) {
     const { error: err } = await supabase.from("pagos_deuda").delete().eq("id", pago.id);
@@ -430,6 +476,8 @@ export function useDeudas() {
     eliminarAbono,
     registrarDesembolso,
     eliminarDesembolso,
+    marcarPagadasHasta,
+    deshacerYaPagadas,
     definirAbonoMensual,
     recargar: cargar,
   };
