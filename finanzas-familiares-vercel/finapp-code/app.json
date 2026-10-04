@@ -5,10 +5,30 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "splash": { "backgroundColor": "#1F6F5C" },
-    "assetBundlePatterns": ["**/*"],
-    "ios": { "supportsTablet": true, "bundleIdentifier": "com.tuempresa.finanzasfamiliares" },
-    "android": { "package": "com.tuempresa.finanzasfamiliares", "adaptiveIcon": { "backgroundColor": "#1F6F5C" } },
-    "web": { "bundler": "metro" }
+    "splash": {
+      "backgroundColor": "#1F6F5C"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tuempresa.finanzasfamiliares"
+    },
+    "android": {
+      "package": "com.tuempresa.finanzasfamiliares",
+      "adaptiveIcon": {
+        "backgroundColor": "#1F6F5C"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "name": "Finanzas Familiares",
+      "shortName": "Finanzas",
+      "lang": "es",
+      "themeColor": "#1F6F5C",
+      "backgroundColor": "#1F6F5C",
+      "favicon": "./public/favicon.png"
+    }
   }
 }
