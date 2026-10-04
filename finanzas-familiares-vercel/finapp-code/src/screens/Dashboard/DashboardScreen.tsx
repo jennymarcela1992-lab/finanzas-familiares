@@ -15,6 +15,7 @@ import Card from "../../components/Card";
 import BarChart from "../../components/BarChart";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
+import { aNumero } from "../../utils/numeros";
 
 export default function DashboardScreen() {
   const { resumen, cargando, error, definirAporte, enviarExcedenteAAhorro } = useCierreMensual();
@@ -94,7 +95,7 @@ export default function DashboardScreen() {
     setGuardando(true);
     try {
       const esUsuarioActual = usuario?.user_metadata?.nombre === nombrePersona || usuario?.email === nombrePersona;
-      await definirAporte(nombrePersona, parseFloat(nuevoAporte.replace(/[^0-9.]/g, "")), esUsuarioActual ? usuario?.id : undefined);
+      await definirAporte(nombrePersona, aNumero(nuevoAporte), esUsuarioActual ? usuario?.id : undefined);
       setEditandoAporte(null);
       setNuevoAporte("");
     } catch (e: any) {
@@ -111,7 +112,7 @@ export default function DashboardScreen() {
     }
     setGuardando(true);
     try {
-      await enviarExcedenteAAhorro(metaElegida, parseFloat(montoExcedente.replace(/[^0-9.]/g, "")));
+      await enviarExcedenteAAhorro(metaElegida, aNumero(montoExcedente));
       setMostrarEnviarExcedente(false);
       setMontoExcedente("");
       setMetaElegida(null);

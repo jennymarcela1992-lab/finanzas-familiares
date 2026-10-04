@@ -11,6 +11,7 @@ import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
+import { aNumero } from "../../utils/numeros";
 
 const RUBROS = ["Mercado", "Servicios", "Salidas y Eventos", "Salud", "Gastos Fijos", "Otro"];
 const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -77,13 +78,13 @@ export default function GastosScreen() {
       await agregarGasto({
         fecha: fecha.toISOString().slice(0, 10),
         item: item.trim(),
-        valor: parseFloat(valor.replace(/[^0-9.]/g, "")),
+        valor: aNumero(valor),
         rubro,
         esCompartido,
         nota: nota.trim() || undefined,
         comprobanteUri: comprobanteUri ?? undefined,
         moneda,
-        valorCop: convertirACOP(parseFloat(valor.replace(/[^0-9.]/g, "")), moneda),
+        valorCop: convertirACOP(aNumero(valor), moneda),
       });
       setItem("");
       setValor("");
@@ -191,7 +192,7 @@ export default function GastosScreen() {
             ))}
           </View>
           {moneda !== "COP" && valor && (
-            <Text style={styles.conversionTexto}>≈ ${convertirACOP(parseFloat(valor.replace(/[^0-9.]/g, "")) || 0, moneda).toLocaleString("es-CO")} COP</Text>
+            <Text style={styles.conversionTexto}>≈ ${convertirACOP(aNumero(valor) || 0, moneda).toLocaleString("es-CO")} COP</Text>
           )}
 
           <TouchableOpacity style={styles.fechaBoton} onPress={() => setMostrarFecha(true)}>

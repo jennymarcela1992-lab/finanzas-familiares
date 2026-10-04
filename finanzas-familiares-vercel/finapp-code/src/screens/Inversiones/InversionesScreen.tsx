@@ -6,6 +6,7 @@ import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
+import { aNumero } from "../../utils/numeros";
 
 export default function InversionesScreen() {
   const { inversiones, cargando, error, crearInversion, agregarMovimiento } = useInversiones();
@@ -27,7 +28,7 @@ export default function InversionesScreen() {
     }
     setGuardando(true);
     try {
-      await crearInversion({ nombre: nombre.trim(), tipo: tipo.trim() || undefined, inversionInicial: parseFloat(inversionInicial.replace(/[^0-9.]/g, "")) });
+      await crearInversion({ nombre: nombre.trim(), tipo: tipo.trim() || undefined, inversionInicial: aNumero(inversionInicial) });
       setNombre(""); setTipo(""); setInversionInicial("");
       setMostrarForm(false);
     } catch (e: any) {
@@ -41,7 +42,7 @@ export default function InversionesScreen() {
     if (!invSeleccionada || !montoMovimiento.trim()) return;
     setGuardando(true);
     try {
-      await agregarMovimiento(invSeleccionada.id, tipoMovimiento, parseFloat(montoMovimiento.replace(/[^0-9.]/g, "")), conceptoMovimiento.trim() || undefined);
+      await agregarMovimiento(invSeleccionada.id, tipoMovimiento, aNumero(montoMovimiento), conceptoMovimiento.trim() || undefined);
       setMontoMovimiento(""); setConceptoMovimiento(""); setInvSeleccionada(null);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo registrar el movimiento.");

@@ -7,6 +7,7 @@ import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
+import { aNumero } from "../../utils/numeros";
 
 export default function PropiedadesScreen() {
   const { propiedades, cargando, error, crearPropiedad, registrarArriendoRecibido } = usePropiedades();
@@ -30,7 +31,7 @@ export default function PropiedadesScreen() {
     }
     setGuardando(true);
     try {
-      await crearPropiedad({ nombre: nombre.trim(), direccion: direccion.trim() || undefined, arrendatario: arrendatario.trim() || undefined, valorArriendo: parseFloat(valorArriendo.replace(/[^0-9.]/g, "")), creditoId: creditoId ?? undefined });
+      await crearPropiedad({ nombre: nombre.trim(), direccion: direccion.trim() || undefined, arrendatario: arrendatario.trim() || undefined, valorArriendo: aNumero(valorArriendo), creditoId: creditoId ?? undefined });
       setNombre(""); setDireccion(""); setArrendatario(""); setValorArriendo(""); setCreditoId(null);
       setMostrarForm(false);
     } catch (e: any) {
@@ -44,7 +45,7 @@ export default function PropiedadesScreen() {
     if (!propSeleccionada || !montoArriendo.trim()) return;
     setGuardando(true);
     try {
-      await registrarArriendoRecibido(propSeleccionada.id, parseFloat(montoArriendo.replace(/[^0-9.]/g, "")));
+      await registrarArriendoRecibido(propSeleccionada.id, aNumero(montoArriendo));
       setMontoArriendo("");
       setPropSeleccionada(null);
     } catch (e: any) {

@@ -6,6 +6,7 @@ import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
+import { aNumero } from "../../utils/numeros";
 
 export default function VehiculoScreen() {
   const { vehiculos, cargando, error, crearVehiculo, registrarPagoHoy } = useVehiculos();
@@ -24,7 +25,7 @@ export default function VehiculoScreen() {
     }
     setGuardando(true);
     try {
-      await crearVehiculo({ nombre: nombre.trim(), placa: placa.trim() || undefined, arrendatario: arrendatario.trim() || undefined, cuotaDiaria: parseFloat(cuotaDiaria.replace(/[^0-9.]/g, "")), diaDescanso });
+      await crearVehiculo({ nombre: nombre.trim(), placa: placa.trim() || undefined, arrendatario: arrendatario.trim() || undefined, cuotaDiaria: aNumero(cuotaDiaria), diaDescanso });
       setNombre(""); setPlaca(""); setArrendatario(""); setCuotaDiaria(""); setDiaDescanso(0);
       setMostrarForm(false);
     } catch (e: any) {

@@ -6,6 +6,7 @@ import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
+import { aNumero } from "../../utils/numeros";
 
 function mesActual() {
   const d = new Date();
@@ -23,7 +24,7 @@ export default function IngresosScreen() {
   function actualizarDeduccion(index: number, campo: "nombre" | "monto", valor: string) {
     const copia = [...deducciones];
     if (campo === "nombre") copia[index].nombre = valor;
-    else copia[index].monto = parseFloat(valor.replace(/[^0-9.]/g, "")) || 0;
+    else copia[index].monto = aNumero(valor) || 0;
     setDeducciones(copia);
   }
 
@@ -35,7 +36,7 @@ export default function IngresosScreen() {
     setGuardando(true);
     try {
       const deduccionesValidas = deducciones.filter((d) => d.nombre.trim() && d.monto > 0);
-      await crearNomina(mes, parseFloat(sueldoBruto.replace(/[^0-9.]/g, "")), deduccionesValidas);
+      await crearNomina(mes, aNumero(sueldoBruto), deduccionesValidas);
       setSueldoBruto("");
       setDeducciones([{ nombre: "Salud", monto: 0 }]);
       setMostrarForm(false);

@@ -6,6 +6,7 @@ import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
+import { aNumero } from "../../utils/numeros";
 
 export default function PrestamosScreen() {
   const { prestamos, cargando, error, crearPrestamo, agregarAbono } = usePrestamos();
@@ -26,7 +27,7 @@ export default function PrestamosScreen() {
     }
     setGuardando(true);
     try {
-      await crearPrestamo({ quienPresta: quienPresta.trim(), quienRecibe: quienRecibe.trim(), monto: parseFloat(monto.replace(/[^0-9.]/g, "")), motivo: motivo.trim() || undefined });
+      await crearPrestamo({ quienPresta: quienPresta.trim(), quienRecibe: quienRecibe.trim(), monto: aNumero(monto), motivo: motivo.trim() || undefined });
       setQuienPresta(""); setQuienRecibe(""); setMonto(""); setMotivo("");
       setMostrarForm(false);
     } catch (e: any) {
@@ -40,7 +41,7 @@ export default function PrestamosScreen() {
     if (!prestamoSeleccionado || !montoAbono.trim()) return;
     setGuardando(true);
     try {
-      await agregarAbono(prestamoSeleccionado.id, parseFloat(montoAbono.replace(/[^0-9.]/g, "")));
+      await agregarAbono(prestamoSeleccionado.id, aNumero(montoAbono));
       setMontoAbono("");
       setPrestamoSeleccionado(null);
     } catch (e: any) {

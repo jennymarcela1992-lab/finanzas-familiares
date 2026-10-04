@@ -6,6 +6,7 @@ import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
+import { aNumero } from "../../utils/numeros";
 
 export default function EventosScreen() {
   const { presupuestos, cargando, error, crearPresupuesto, agregarItem, registrarValorReal } = usePresupuestosEvento();
@@ -42,7 +43,7 @@ export default function EventosScreen() {
     if (!nombreItem.trim() || !valorPlaneadoItem.trim()) return;
     setGuardando(true);
     try {
-      await agregarItem(presupuestoId, nombreItem.trim(), parseFloat(valorPlaneadoItem.replace(/[^0-9.]/g, "")));
+      await agregarItem(presupuestoId, nombreItem.trim(), aNumero(valorPlaneadoItem));
       setNombreItem(""); setValorPlaneadoItem("");
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo agregar el ítem.");
@@ -55,7 +56,7 @@ export default function EventosScreen() {
     if (!itemSeleccionado || !valorRealInput.trim()) return;
     setGuardando(true);
     try {
-      await registrarValorReal(itemSeleccionado.id, parseFloat(valorRealInput.replace(/[^0-9.]/g, "")));
+      await registrarValorReal(itemSeleccionado.id, aNumero(valorRealInput));
       setValorRealInput(""); setItemSeleccionado(null);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo guardar el gasto real.");

@@ -7,6 +7,7 @@ import Card from "../../components/Card";
 import ProgressBar from "../../components/ProgressBar";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
+import { aNumero } from "../../utils/numeros";
 
 export default function AhorrosScreen() {
   const { metas, cargando, error, crearMeta, agregarAporte } = useAhorros();
@@ -26,7 +27,7 @@ export default function AhorrosScreen() {
     }
     setGuardando(true);
     try {
-      await crearMeta(nombreMeta.trim(), parseFloat(montoObjetivo.replace(/[^0-9.]/g, "")));
+      await crearMeta(nombreMeta.trim(), aNumero(montoObjetivo));
       setNombreMeta("");
       setMontoObjetivo("");
       setMostrarNuevaMeta(false);
@@ -41,7 +42,7 @@ export default function AhorrosScreen() {
     if (!metaSeleccionada || !montoAporte.trim()) return;
     setGuardando(true);
     try {
-      await agregarAporte(metaSeleccionada.id, parseFloat(montoAporte.replace(/[^0-9.]/g, "")), notaAporte.trim() || undefined);
+      await agregarAporte(metaSeleccionada.id, aNumero(montoAporte), notaAporte.trim() || undefined);
       setMontoAporte("");
       setNotaAporte("");
       setMetaSeleccionada(null);
