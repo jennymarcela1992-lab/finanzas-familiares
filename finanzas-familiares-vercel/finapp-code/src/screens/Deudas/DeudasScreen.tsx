@@ -2,6 +2,8 @@ import React, { useMemo, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Alert, ScrollView, Switch } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useDeudas, DeudaConCuotas, CuotaRow, AbonoRow, DatosDeuda } from "../../hooks/useDeudas";
+import { usePersonas } from "../../hooks/usePersonas";
+import { PagoDeudaRow } from "../../utils/pagosDeuda";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import ProgressBar from "../../components/ProgressBar";
@@ -41,8 +43,8 @@ export default function DeudasScreen() {
     crearDeuda,
     editarDeuda,
     eliminarDeuda,
-    marcarPagadaHasta,
-    desmarcarPagada,
+    registrarPago,
+    eliminarPago,
     registrarAbono,
     eliminarAbono,
   } = useDeudas();
@@ -54,6 +56,8 @@ export default function DeudasScreen() {
   const [guardando, setGuardando] = useState(false);
   const [deudaAbierta, setDeudaAbierta] = useState<string | null>(null);
   const [abonoEn, setAbonoEn] = useState<string | null>(null);
+  const [pagoEn, setPagoEn] = useState<string | null>(null);
+  const { personas, yo } = usePersonas();
 
   const cambiar = (campo: keyof typeof FORM_VACIO) => (v: string) => setForm((f) => ({ ...f, [campo]: v }));
 
@@ -147,19 +151,19 @@ export default function DeudasScreen() {
     ]);
   }
 
-  function tocarCuota(d: DeudaConCuotas, c: CuotaRow) {
+  function tocarCuota(c: CuotaRow) {
     if (c.estado === "pagada") {
-      Alert.alert("Cuota pagada", `¿Desmarcar la cuota #${c.numero_cuota}? Volverá a quedar pendiente.`, [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Desmarcar", onPress: () => desmarcarPagada(c.id).catch((e) => Alert.alert("Error", e.message)) },
-      ]);
-      return;
+      Alert.alert(`Cuota #${c.numero_cuota} pagada`, `Pagó: ${c.pagada_por ?? "—"}${c.fecha_pago ? ` · ${formatoFecha(c.fecha_pago)}` : ""}\n\nPara corregirla, borra el pago en la lista "Pagos registrados".`);
+    } else {
+      Alert.alert(`Cuota #${c.numero_cuota}`, `Falta ${pesos(Number(c.cuota_total) - Number(c.valor_pagado ?? 0))}. Queda pagada cuando registres el pago (botón "Registrar pago", un gasto de crédito o un arriendo).`);
     }
-    const primera = d.proximaCuota?.numero_cuota ?? c.numero_cuota;
-    const rango = primera < c.numero_cuota ? `las cuotas #${primera} a #${c.numero_cuota}` : `la cuota #${c.numero_cuota}`;
-    Alert.alert("Registrar pago", `¿Marcar como pagada ${rango}? Se registra con fecha de hoy.`, [
+  }
+
+  function confirmarBorrarPago(p: PagoDeudaRow) {
+    const extra = p.gasto_id ? " También se borra el gasto asociado." : p.arriendo_id ? " El arriendo sigue registrado como entrada." : "";
+    Alert.alert("Borrar pago", `¿Borrar el pago de ${pesos(Number(p.valor))} (${p.pagado_por ?? ""}, ${formatoFecha(p.fecha)})?${extra}`, [
       { text: "Cancelar", style: "cancel" },
-      { text: "Marcar pagada", onPress: () => marcarPagadaHasta(d.id, c.numero_cuota).catch((e) => Alert.alert("Error", e.message)) },
+      { text: "Borrar", style: "destructive", onPress: () => eliminarPago(p).catch((e) => Alert.alert("Error", e.message)) },
     ]);
   }
 
@@ -310,22 +314,23 @@ export default function DeudasScreen() {
           <View>
             <View style={styles.acciones}>
               {d.proximaCuota && (
-                <Accion icono="checkmark-circle" texto="Pagué la cuota" onPress={() => tocarCuota(d, d.proximaCuota!)} />
+                <Accion icono="checkmark-circle" texto="Registrar pago" onPress={() => { setAbonoEn(null); setPagoEn(pagoEn === d.id ? null : d.id); }} />
               )}
-              {!terminada && <Accion icono="cash" texto="Abono extra" onPress={() => setAbonoEn(abonoEn === d.id ? null : d.id)} />}
+              {!terminada && <Accion icono="cash" texto="Abono extra" onPress={() => { setPagoEn(null); setAbonoEn(abonoEn === d.id ? null : d.id); }} />}
               <Accion icono="create" texto="Editar" onPress={() => abrirEdicion(d)} />
               <Accion icono="trash" texto="Eliminar" color={colors.danger} onPress={() => confirmarEliminar(d)} />
             </View>
 
+            {pagoEn === d.id && <FormPago deuda={d} personas={personas} yo={yo} onCerrar={() => setPagoEn(null)} registrar={registrarPago} />}
             {abonoEn === d.id && <FormAbono deuda={d} onCerrar={() => setAbonoEn(null)} registrar={registrarAbono} />}
 
             <Text style={[styles.label, { marginTop: spacing.md }]}>Tabla de amortización</Text>
-            <Text style={styles.ayuda}>Toca una cuota pendiente para marcarla pagada, o una pagada para desmarcarla.</Text>
+            <Text style={styles.ayuda}>Una cuota queda pagada cuando se registra su pago. Toca una cuota para ver el detalle.</Text>
             <ScrollView style={{ maxHeight: 340, marginTop: spacing.xs }} nestedScrollEnabled>
               {d.cuotas.map((c) => {
                 const pagada = c.estado === "pagada";
                 return (
-                  <TouchableOpacity key={c.id} style={styles.cuotaRow} onPress={() => tocarCuota(d, c)}>
+                  <TouchableOpacity key={c.id} style={styles.cuotaRow} onPress={() => tocarCuota(c)}>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.cuotaTexto, pagada && styles.cuotaPagada]}>
                         #{c.numero_cuota} · {formatoFecha(c.fecha_vencimiento)} · <Text style={{ fontWeight: "700" }}>{pesos(Number(c.cuota_total))}</Text>
@@ -334,16 +339,39 @@ export default function DeudasScreen() {
                         Capital {pesos(Number(c.capital))} · Interés {pesos(Number(c.interes))}
                         {Number(c.seguro) ? ` · Seguros ${pesos(Number(c.seguro))}` : ""} · Saldo {pesos(Number(c.saldo))}
                       </Text>
+                      {!pagada && Number(c.valor_pagado ?? 0) > 0 && (
+                        <Text style={styles.parcial}>Abonado {pesos(Number(c.valor_pagado))} · falta {pesos(Number(c.cuota_total) - Number(c.valor_pagado))}</Text>
+                      )}
                     </View>
                     <View style={[styles.pill, pagada ? styles.pillSuccess : styles.pillWarning]}>
                       <Text style={[styles.pillText, pagada ? styles.pillTextSuccess : styles.pillTextWarning]}>
-                        {pagada ? `✓ ${c.pagada_por ?? "Pagada"}` : "Pendiente"}
+                        {pagada ? `✓ ${c.pagada_por ?? "Pagada"}` : Number(c.valor_pagado ?? 0) > 0 ? "Parcial" : "Pendiente"}
                       </Text>
                     </View>
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
+
+            {d.pagos.length > 0 && (
+              <View style={{ marginTop: spacing.md }}>
+                <Text style={styles.label}>Pagos registrados</Text>
+                {d.pagos.filter((p) => p.origen !== "registro_inicial").slice(0, 12).map((p) => (
+                  <TouchableOpacity key={p.id} style={styles.cuotaRow} onPress={() => confirmarBorrarPago(p)}>
+                    <Ionicons name={p.origen === "arriendo" ? "business" : "person"} size={14} color={colors.primary} />
+                    <Text style={[styles.cuotaTexto, { flex: 1 }]}>
+                      {formatoFecha(p.fecha)} · <Text style={{ fontWeight: "700" }}>{pesos(Number(p.valor))}</Text> · {p.pagado_por}
+                    </Text>
+                    <Ionicons name="close-circle-outline" size={16} color={colors.textMuted} />
+                  </TouchableOpacity>
+                ))}
+                {d.pagos.some((p) => p.origen === "registro_inicial") && (
+                  <Text style={styles.ayuda}>
+                    {d.pagos.filter((p) => p.origen === "registro_inicial").length} cuota(s) quedaron pagadas en el registro inicial del crédito.
+                  </Text>
+                )}
+              </View>
+            )}
 
             {d.abonos.length > 0 && (
               <View style={{ marginTop: spacing.md }}>
@@ -401,6 +429,70 @@ function Accion({ icono, texto, onPress, color = colors.primary }: { icono: any;
       <Ionicons name={icono} size={16} color={color} />
       <Text style={[styles.accionTexto, { color }]}>{texto}</Text>
     </TouchableOpacity>
+  );
+}
+
+// ---------- Registrar pago de cuota ----------
+function FormPago({
+  deuda,
+  personas,
+  yo,
+  onCerrar,
+  registrar,
+}: {
+  deuda: DeudaConCuotas;
+  personas: string[];
+  yo: string;
+  onCerrar: () => void;
+  registrar: (id: string, valor: number, fecha: string, persona: string) => Promise<void>;
+}) {
+  const [valor, setValor] = useState(deuda.restanteProxima.toLocaleString("es-CO"));
+  const [fecha, setFecha] = useState(hoyISO());
+  const [persona, setPersona] = useState(yo || personas[0] || "");
+  const [guardando, setGuardando] = useState(false);
+  const c = deuda.proximaCuota;
+
+  async function guardar() {
+    const v = aNumero(valor);
+    if (!(v > 0)) return Alert.alert("Valor no válido", "Escribe el valor pagado.");
+    if (!esFechaValida(fecha)) return Alert.alert("Fecha no válida", "Escribe la fecha así: AAAA-MM-DD.");
+    if (!persona) return Alert.alert("Falta quién pagó", "Elige quién hizo el pago.");
+    setGuardando(true);
+    try {
+      await registrar(deuda.id, v, fecha, persona);
+      onCerrar();
+    } catch (e: any) {
+      Alert.alert("Error", e.message ?? "No se pudo registrar el pago.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <View style={styles.abonoBox}>
+      <Text style={typography.h3}>Registrar pago</Text>
+      {c && (
+        <Text style={styles.ayuda}>
+          Cuota #{c.numero_cuota} vence {formatoFecha(c.fecha_vencimiento)} · falta {pesos(deuda.restanteProxima)}. Si pagas más, el excedente pasa a la siguiente cuota.
+        </Text>
+      )}
+      <Text style={styles.label}>¿Quién pagó?</Text>
+      <View style={styles.chips}>
+        {(personas.length ? personas : [yo]).filter(Boolean).map((p) => (
+          <TouchableOpacity key={p} onPress={() => setPersona(p)} style={[styles.chip, persona === p && styles.chipActivo]}>
+            <Text style={[styles.chipTexto, persona === p && styles.chipTextoActivo]}>{p}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <Text style={[styles.ayuda, { marginTop: 4 }]}>Si la pagó un arriendo, regístralo en Propiedades y elige este crédito como destino.</Text>
+      <Text style={styles.label}>Valor pagado</Text>
+      <TextInput style={styles.input} value={valor} onChangeText={setValor} keyboardType="numeric" placeholder="Valor" placeholderTextColor={colors.textMuted} />
+      <Text style={styles.label}>Fecha del pago</Text>
+      <TextInput style={styles.input} value={fecha} onChangeText={setFecha} placeholder="AAAA-MM-DD" placeholderTextColor={colors.textMuted} />
+      <Text style={styles.ayuda}>Queda también como gasto (rubro Créditos) a nombre de quien pagó.</Text>
+      <PrimaryButton title="Guardar pago" onPress={guardar} loading={guardando} />
+      <PrimaryButton title="Cancelar" variant="outline" onPress={onCerrar} style={{ marginTop: spacing.sm }} />
+    </View>
   );
 }
 
@@ -521,7 +613,7 @@ const styles = StyleSheet.create({
   inputError: { borderWidth: 1, borderColor: colors.danger },
   fila: { flexDirection: "row", alignItems: "center", gap: 8 },
   sufijo: { fontSize: 15, color: colors.textSecondary, marginBottom: spacing.sm },
-  chips: { flexDirection: "row", gap: 8, marginBottom: 4 },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 4 },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.background },
   chipActivo: { backgroundColor: colors.primary },
   chipTexto: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
@@ -550,6 +642,7 @@ const styles = StyleSheet.create({
   pillText: { fontSize: 10, fontWeight: "700" },
   pillTextWarning: { color: colors.warning },
   pillTextSuccess: { color: colors.success },
+  parcial: { fontSize: 11, color: colors.warning, fontWeight: "600", marginTop: 2 },
   abonoBox: { marginTop: spacing.md, padding: spacing.md, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border },
   opcion: { flexDirection: "row", gap: 8, alignItems: "flex-start", padding: spacing.sm, borderRadius: radius.sm, marginBottom: spacing.xs },
   opcionActiva: { backgroundColor: colors.primaryLight },

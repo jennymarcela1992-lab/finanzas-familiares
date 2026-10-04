@@ -9,7 +9,7 @@ export interface MesBalance {
   arriendos: number;
   vehiculo: number;
   gastos: number;
-  cuotas: number; // cuotas de créditos que vencen en el mes
+  cuotas: number; // pagos de créditos registrados en el mes (cuotas + abonos extra)
   balance: number; // ingresos - gastos - cuotas
 }
 
@@ -68,19 +68,20 @@ export function useDashboard(mes: string) {
     const hoy = hoyISO();
     const en30 = sumarMeses(hoy, 1);
 
-    const [rG, rN, rDed, rArr, rVeh, rPV, rCu, rDeu, rAb, rMet, rApo, rProp] = await Promise.all([
-      supabase.from("gastos").select("fecha, valor, valor_cop, rubro, borrado").gte("fecha", desde).lt("fecha", hasta),
+    const [rG, rN, rDed, rArr, rVeh, rPV, rCu, rDeu, rAb, rMet, rApo, rProp, rPag] = await Promise.all([
+      supabase.from("gastos").select("id, fecha, valor, valor_cop, rubro, borrado, deuda_id").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("nomina_mensual").select("id, mes, sueldo_bruto").gte("mes", meses[0]).lte("mes", mes),
       supabase.from("deducciones_nomina").select("nomina_id, monto"),
       supabase.from("arriendos_recibidos").select("propiedad_id, mes, monto").gte("mes", meses[0]).lte("mes", mes),
       supabase.from("vehiculos").select("id, nombre, cuota_diaria"),
       supabase.from("pagos_vehiculo").select("vehiculo_id, fecha, estado, monto").gte("fecha", desde).lt("fecha", hasta),
-      supabase.from("cuotas_deuda").select("deuda_id, numero_cuota, cuota_total, capital, fecha_vencimiento, estado"),
+      supabase.from("cuotas_deuda").select("deuda_id, numero_cuota, cuota_total, valor_pagado, capital, fecha_vencimiento, estado"),
       supabase.from("deudas").select("id, nombre, valor_inicial, entidad_pago"),
-      supabase.from("abonos_deuda").select("deuda_id, valor"),
+      supabase.from("abonos_deuda").select("deuda_id, valor, fecha"),
       supabase.from("metas_ahorro").select("id, nombre, monto_objetivo"),
       supabase.from("aportes_ahorro").select("meta_id, monto"),
       supabase.from("propiedades").select("id, nombre, valor_arriendo"),
+      supabase.from("pagos_deuda").select("fecha, valor, origen, gasto_id").gte("fecha", desde).lt("fecha", hasta),
     ]);
 
     const fallo = [rG, rN, rCu, rDeu, rMet, rApo].find((r) => r.error);
@@ -94,8 +95,10 @@ export function useDashboard(mes: string) {
     const base = (m: string): MesBalance => ({ mes: m, ingresos: 0, nomina: 0, arriendos: 0, vehiculo: 0, gastos: 0, cuotas: 0, balance: 0 });
     const porMes = new Map(meses.map((m) => [m, base(m)]));
 
+    // Los gastos que son pagos de créditos se cuentan en "cuotas", no en gastos (para no sumarlos dos veces)
+    const gastosEnPapelera = new Set((rG.data ?? []).filter((g: any) => g.borrado).map((g: any) => g.id));
     (rG.data ?? []).forEach((g: any) => {
-      if (g.borrado) return;
+      if (g.borrado || g.deuda_id) return;
       const b = porMes.get(mesDe(g.fecha));
       if (b) b.gastos += Number(g.valor_cop ?? g.valor);
     });
@@ -119,9 +122,14 @@ export function useDashboard(mes: string) {
       if (b) b.vehiculo += Number(p.monto ?? cuotaDiaria.get(p.vehiculo_id) ?? 0);
     });
 
-    (rCu.data ?? []).forEach((c: any) => {
-      const b = porMes.get(mesDe(c.fecha_vencimiento));
-      if (b) b.cuotas += Number(c.cuota_total);
+    (rPag.error ? [] : rPag.data ?? []).forEach((p: any) => {
+      if (p.origen === "registro_inicial" || (p.gasto_id && gastosEnPapelera.has(p.gasto_id))) return;
+      const b = porMes.get(mesDe(p.fecha));
+      if (b) b.cuotas += Number(p.valor);
+    });
+    (rAb.error ? [] : rAb.data ?? []).forEach((a: any) => {
+      const b = porMes.get(mesDe(a.fecha));
+      if (b) b.cuotas += Number(a.valor);
     });
 
     porMes.forEach((b) => {
@@ -135,7 +143,7 @@ export function useDashboard(mes: string) {
     const rubrosAnterior: Record<string, number> = {};
     const mesAnterior = moverMes(mes, -1);
     (rG.data ?? []).forEach((g: any) => {
-      if (g.borrado) return;
+      if (g.borrado || g.deuda_id) return;
       const r = g.rubro || "Otro";
       const v = Number(g.valor_cop ?? g.valor);
       if (mesDe(g.fecha) === mes) rubros[r] = (rubros[r] ?? 0) + v;
@@ -170,13 +178,13 @@ export function useDashboard(mes: string) {
       .forEach((c: any) => {
         if (c.fecha_vencimiento < hoy) {
           const d = deudasInfo.get(c.deuda_id);
-          proximos.push({ tipo: "cuota", titulo: d?.nombre ?? "Crédito", detalle: `Cuota #${c.numero_cuota} vencida${d?.entidad_pago ? ` · ${d.entidad_pago}` : ""}`, valor: Number(c.cuota_total), fecha: c.fecha_vencimiento, vencido: true });
+          proximos.push({ tipo: "cuota", titulo: d?.nombre ?? "Crédito", detalle: `Cuota #${c.numero_cuota} vencida${d?.entidad_pago ? ` · ${d.entidad_pago}` : ""}`, valor: Number(c.cuota_total) - Number(c.valor_pagado ?? 0), fecha: c.fecha_vencimiento, vencido: true });
         } else if (!primeraPendiente.has(c.deuda_id)) primeraPendiente.set(c.deuda_id, c);
       });
     primeraPendiente.forEach((c) => {
       if (c.fecha_vencimiento > en30) return;
       const d = deudasInfo.get(c.deuda_id);
-      proximos.push({ tipo: "cuota", titulo: d?.nombre ?? "Crédito", detalle: `Cuota #${c.numero_cuota}${d?.entidad_pago ? ` · ${d.entidad_pago}` : ""}`, valor: Number(c.cuota_total), fecha: c.fecha_vencimiento, vencido: false });
+      proximos.push({ tipo: "cuota", titulo: d?.nombre ?? "Crédito", detalle: `Cuota #${c.numero_cuota}${d?.entidad_pago ? ` · ${d.entidad_pago}` : ""}`, valor: Number(c.cuota_total) - Number(c.valor_pagado ?? 0), fecha: c.fecha_vencimiento, vencido: false });
     });
 
     const mesActual = hoy.slice(0, 7);

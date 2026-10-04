@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, Alert, Platform, Image, Modal } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, Alert, Platform, Image, Modal, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
@@ -7,25 +7,44 @@ import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useGastos, GastoRow } from "../../hooks/useGastos";
 import { useTasasCambio } from "../../hooks/useTasasCambio";
+import { useDeudas } from "../../hooks/useDeudas";
+import { formatoFecha, pesos } from "../../utils/amortizacion";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
 
-const RUBROS = ["Mercado", "Servicios", "Salidas y Eventos", "Salud", "Gastos Fijos", "Otro"];
+const RUBROS = ["Mercado", "Servicios", "Salidas y Eventos", "Salud", "Gastos Fijos", "Créditos", "Otro"];
 const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
   Mercado: "cart",
   Servicios: "flash",
   "Salidas y Eventos": "sparkles",
   Salud: "medkit",
   "Gastos Fijos": "home",
+  Créditos: "card",
   Otro: "ellipsis-horizontal",
 };
 
 export default function GastosScreen() {
   const { gastos, papelera, cargando, error, agregarGasto, moverAPapelera, restaurarGasto, borrarGasto, generarCSV } = useGastos();
   const { tasas, convertirACOP } = useTasasCambio();
+  const { deudas, recargar: recargarDeudas } = useDeudas();
+  const [esPagoCredito, setEsPagoCredito] = useState(false);
+  const [deudaElegida, setDeudaElegida] = useState<string | null>(null);
+  const deudasConCuotas = deudas.filter((d) => d.proximaCuota);
+  const deudaSel = deudas.find((d) => d.id === deudaElegida);
+
+  function elegirDeuda(id: string) {
+    const d = deudas.find((x) => x.id === id);
+    setDeudaElegida(id);
+    if (d) {
+      setItem(`Cuota ${d.nombre}`);
+      setValor(d.restanteProxima.toLocaleString("es-CO"));
+      setRubro("Créditos");
+      setMoneda("COP");
+    }
+  }
   const [moneda, setMoneda] = useState("COP");
   const [verPapelera, setVerPapelera] = useState(false);
   const [busqueda, setBusqueda] = useState("");
@@ -69,6 +88,10 @@ export default function GastosScreen() {
   }
 
   async function manejarGuardar() {
+    if (esPagoCredito && !deudaElegida) {
+      Alert.alert("Falta el crédito", "Elige cuál crédito estás pagando.");
+      return;
+    }
     if (!item.trim() || !valor.trim()) {
       Alert.alert("Faltan datos", "Escribe al menos el nombre del gasto y el valor.");
       return;
@@ -83,6 +106,7 @@ export default function GastosScreen() {
         esCompartido,
         nota: nota.trim() || undefined,
         comprobanteUri: comprobanteUri ?? undefined,
+        deudaId: esPagoCredito && deudaElegida ? deudaElegida : undefined,
         moneda,
         valorCop: convertirACOP(aNumero(valor), moneda),
       });
@@ -92,6 +116,9 @@ export default function GastosScreen() {
       setFecha(new Date());
       setComprobanteUri(null);
       setMoneda("COP");
+      if (esPagoCredito) recargarDeudas();
+      setEsPagoCredito(false);
+      setDeudaElegida(null);
       setMostrarForm(false);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo guardar el gasto.");
@@ -180,7 +207,44 @@ export default function GastosScreen() {
       )}
 
       {mostrarForm && (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xxl }} keyboardShouldPersistTaps="handled">
         <Card style={styles.formCard}>
+          <View style={styles.switchRow}>
+            <Text style={typography.body}>¿Es pago de un crédito?</Text>
+            <Switch
+              value={esPagoCredito}
+              onValueChange={(v) => {
+                setEsPagoCredito(v);
+                if (!v) setDeudaElegida(null);
+              }}
+              trackColor={{ true: colors.primary }}
+            />
+          </View>
+          {esPagoCredito && (
+            <View style={styles.creditoBox}>
+              {deudasConCuotas.length === 0 ? (
+                <Text style={typography.caption}>No hay créditos con cuotas pendientes. Créalos en Deudas y créditos.</Text>
+              ) : (
+                <>
+                  <Text style={styles.label}>¿Cuál crédito?</Text>
+                  <View style={styles.chipsRow}>
+                    {deudasConCuotas.map((d) => (
+                      <TouchableOpacity key={d.id} style={[styles.chip, deudaElegida === d.id && styles.chipActivo]} onPress={() => elegirDeuda(d.id)}>
+                        <Text style={[styles.chipText, deudaElegida === d.id && styles.chipTextActivo]}>{d.nombre}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {deudaSel?.proximaCuota && (
+                    <Text style={styles.creditoInfo}>
+                      Cuota #{deudaSel.proximaCuota.numero_cuota} vence {formatoFecha(deudaSel.proximaCuota.fecha_vencimiento)} · falta {pesos(deudaSel.restanteProxima)}
+                      {Number(deudaSel.proximaCuota.valor_pagado ?? 0) > 0 ? ` (ya abonado ${pesos(Number(deudaSel.proximaCuota.valor_pagado))})` : ""}
+                      . Si pagas más, el excedente se abona a la siguiente cuota.
+                    </Text>
+                  )}
+                </>
+              )}
+            </View>
+          )}
           <TextInput style={styles.input} placeholder="¿Qué fue el gasto?" placeholderTextColor={colors.textMuted} value={item} onChangeText={setItem} />
           <TextInput style={styles.input} placeholder="Valor (ej. 45000)" placeholderTextColor={colors.textMuted} value={valor} onChangeText={setValor} keyboardType="numeric" />
 
@@ -252,9 +316,10 @@ export default function GastosScreen() {
 
           <PrimaryButton title="Guardar gasto" onPress={manejarGuardar} loading={guardando} style={{ marginTop: spacing.sm }} />
         </Card>
+        </ScrollView>
       )}
 
-      {cargando ? (
+      {mostrarForm ? null : cargando ? (
         <ActivityIndicator style={{ marginTop: 24 }} color={colors.primary} />
       ) : error ? (
         <Text style={styles.errorText}>Error cargando gastos: {error}</Text>
@@ -275,6 +340,11 @@ export default function GastosScreen() {
                   <Text style={typography.caption}>
                     {g.rubro} · {g.fecha} {g.usuario_pago_nombre ? `· pagó ${g.usuario_pago_nombre}` : ""}
                   </Text>
+                  {g.deuda_id && (
+                    <Text style={styles.creditoBadge}>
+                      Pago de crédito{deudas.find((d) => d.id === g.deuda_id) ? `: ${deudas.find((d) => d.id === g.deuda_id)!.nombre}` : ""}
+                    </Text>
+                  )}
                   {g.nota && <Text style={styles.nota}>{g.nota}</Text>}
                   {verPapelera && g.borrado_por && <Text style={styles.historialTexto}>Borrado por {g.borrado_por}</Text>}
                 </View>
@@ -323,6 +393,9 @@ const styles = StyleSheet.create({
   chipActivo: { backgroundColor: colors.primary },
   chipText: { color: colors.primary, fontSize: 12, fontWeight: "600" },
   chipTextActivo: { color: colors.white },
+  creditoBox: { backgroundColor: colors.primaryLight, borderRadius: radius.sm, padding: spacing.sm, marginBottom: spacing.sm },
+  creditoInfo: { fontSize: 12, color: colors.primary },
+  creditoBadge: { fontSize: 11, color: colors.primary, fontWeight: "700", marginTop: 2 },
   switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm, marginTop: 4 },
   gastoCard: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   iconoRubro: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },

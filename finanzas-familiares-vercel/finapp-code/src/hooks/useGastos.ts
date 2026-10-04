@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Platform } from "react-native";
 import { supabase } from "../config/supabase";
+import { registrarPagoDeuda, reaplicarPagos } from "../utils/pagosDeuda";
 
 export interface GastoRow {
   id: string;
@@ -18,6 +19,7 @@ export interface GastoRow {
   es_recurrente: boolean;
   comprobante_url: string | null; // ruta interna de la foto en el bucket privado
   comprobante_ver?: string | null; // enlace temporal para mostrarla
+  deuda_id?: string | null; // si es pago de un crédito
   borrado: boolean;
   borrado_por: string | null;
   restaurado_por: string | null;
@@ -37,6 +39,7 @@ export interface NuevoGasto {
   comprobanteUri?: string; // uri local de la foto elegida, antes de subirla
   moneda?: string; // COP por defecto
   valorCop?: number; // ya convertido a pesos, calculado con la tasa de cambio
+  deudaId?: string; // si el gasto es el pago de un crédito
 }
 
 const BUCKET = "comprobantes";
@@ -148,7 +151,8 @@ export function useGastos() {
       comprobanteUrl = await subirComprobante(nuevo.comprobanteUri, usuario.id);
     }
 
-    const { error: err } = await supabase.from("gastos").insert({
+    const pagadoPor = usuario?.user_metadata?.nombre ?? usuario?.email ?? "Alguien";
+    const { data: creado, error: err } = await supabase.from("gastos").insert({
       fecha: nuevo.fecha,
       item: nuevo.item,
       valor: nuevo.valor,
@@ -163,10 +167,26 @@ export function useGastos() {
       nota: nuevo.nota ?? null,
       es_recurrente: nuevo.esRecurrente ?? false,
       comprobante_url: comprobanteUrl,
-    });
+      ...(nuevo.deudaId ? { deuda_id: nuevo.deudaId } : {}),
+    }).select().single();
     if (err) {
       if (comprobanteUrl) await supabase.storage.from(BUCKET).remove([comprobanteUrl]);
       throw err;
+    }
+    if (nuevo.deudaId) {
+      try {
+        await registrarPagoDeuda({
+          deudaId: nuevo.deudaId,
+          valor: nuevo.valorCop ?? nuevo.valor,
+          fecha: nuevo.fecha,
+          origen: "persona",
+          pagadoPor,
+          gastoId: creado.id,
+        });
+      } catch (e) {
+        await supabase.from("gastos").delete().eq("id", creado.id);
+        throw e;
+      }
     }
     await cargarGastos();
   }
@@ -179,6 +199,8 @@ export function useGastos() {
       .update({ borrado: true, fecha_borrado: new Date().toISOString(), borrado_por: nombre })
       .eq("id", id);
     if (err) throw err;
+    const g = gastos.find((x) => x.id === id);
+    if (g?.deuda_id) await reaplicarPagos(g.deuda_id); // la cuota deja de contar como pagada
     await cargarGastos();
   }
 
@@ -190,6 +212,8 @@ export function useGastos() {
       .update({ borrado: false, restaurado_por: nombre, restaurado_en: new Date().toISOString() })
       .eq("id", id);
     if (err) throw err;
+    const g = papelera.find((x) => x.id === id);
+    if (g?.deuda_id) await reaplicarPagos(g.deuda_id);
     await cargarGastos();
   }
 
@@ -197,6 +221,7 @@ export function useGastos() {
     const fila = [...gastos, ...papelera].find((g) => g.id === id);
     const { error: err } = await supabase.from("gastos").delete().eq("id", id);
     if (err) throw err;
+    if (fila?.deuda_id) await reaplicarPagos(fila.deuda_id); // el pago se borró junto con el gasto
     if (fila?.comprobante_url) {
       await supabase.storage.from(BUCKET).remove([rutaDeComprobante(fila.comprobante_url)]);
     }

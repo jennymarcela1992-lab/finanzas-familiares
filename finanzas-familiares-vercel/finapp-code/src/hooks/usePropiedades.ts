@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { registrarPagoDeuda } from "../utils/pagosDeuda";
+import { hoyISO } from "../utils/amortizacion";
 
 export interface ArriendoRow {
   id: string;
@@ -128,9 +130,39 @@ export function usePropiedades() {
     await cargar();
   }
 
-  async function registrarArriendoRecibido(propiedadId: string, monto: number, mes?: string) {
-    const { error: err } = await supabase.from("arriendos_recibidos").insert({ propiedad_id: propiedadId, monto, mes: mes ?? mesActual() });
+  /**
+   * Registra el arriendo recibido. Si se indica `destino`, parte (o todo) se usa para pagar la cuota de un crédito
+   * y esa cuota queda pagada cuando el valor la cubre.
+   */
+  async function registrarArriendoRecibido(
+    propiedadId: string,
+    monto: number,
+    opciones: { mes?: string; fecha?: string; destino?: { deudaId: string; valor: number } } = {}
+  ) {
+    const fecha = opciones.fecha ?? hoyISO();
+    const { data: arriendo, error: err } = await supabase
+      .from("arriendos_recibidos")
+      .insert({ propiedad_id: propiedadId, monto, mes: opciones.mes ?? fecha.slice(0, 7), fecha })
+      .select()
+      .single();
     if (err) throw err;
+
+    if (opciones.destino && opciones.destino.valor > 0) {
+      const prop = propiedades.find((p) => p.id === propiedadId);
+      try {
+        await registrarPagoDeuda({
+          deudaId: opciones.destino.deudaId,
+          valor: opciones.destino.valor,
+          fecha,
+          origen: "arriendo",
+          pagadoPor: `Arriendo ${prop?.nombre ?? ""}`.trim(),
+          arriendoId: arriendo.id,
+        });
+      } catch (e) {
+        await supabase.from("arriendos_recibidos").delete().eq("id", arriendo.id);
+        throw e;
+      }
+    }
     await cargar();
   }
 

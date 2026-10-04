@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
 import { TipoTasa, tasaMensual, generarCuotas, sumarMeses, hoyISO } from "../utils/amortizacion";
+import { PagoDeudaRow, reaplicarPagos, registrarPagoDeuda, restanteDeCuota, nombreUsuarioActual } from "../utils/pagosDeuda";
 
 export interface CuotaRow {
   id: string;
@@ -13,6 +14,7 @@ export interface CuotaRow {
   saldo: number;
   fecha_vencimiento: string;
   estado: "pendiente" | "pagada";
+  valor_pagado: number | null; // lo abonado a esta cuota (pagos registrados)
   pagada_por: string | null;
   fecha_pago: string | null;
 }
@@ -47,6 +49,8 @@ export interface DeudaRow {
 export interface DeudaConCuotas extends DeudaRow {
   cuotas: CuotaRow[];
   abonos: AbonoRow[];
+  pagos: PagoDeudaRow[];
+  restanteProxima: number; // lo que falta por pagar de la próxima cuota
   cuotasPagadas: number;
   porcentajePagado: number; // según capital pagado (incluye abonos)
   proximaCuota: CuotaRow | null;
@@ -97,10 +101,11 @@ export function useDeudas() {
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const [rD, rC, rA] = await Promise.all([
+    const [rD, rC, rA, rP] = await Promise.all([
       supabase.from("deudas").select("*").order("creado_en", { ascending: false }),
       supabase.from("cuotas_deuda").select("*").order("numero_cuota", { ascending: true }),
       supabase.from("abonos_deuda").select("*").order("fecha", { ascending: true }),
+      supabase.from("pagos_deuda").select("*").order("fecha", { ascending: false }),
     ]);
     const err = rD.error ?? rC.error;
     if (err) {
@@ -110,6 +115,7 @@ export function useDeudas() {
     }
     // si la tabla de abonos aún no existe (falta correr el SQL), seguimos sin abonos
     const abonosData = (rA.error ? [] : rA.data ?? []) as AbonoRow[];
+    const pagosData = (rP.error ? [] : rP.data ?? []) as PagoDeudaRow[];
 
     const combinadas: DeudaConCuotas[] = (rD.data ?? []).map((d: DeudaRow) => {
       const cuotas = (rC.data ?? []).filter((c: CuotaRow) => c.deuda_id === d.id) as CuotaRow[];
@@ -121,6 +127,8 @@ export function useDeudas() {
         ...d,
         cuotas,
         abonos,
+        pagos: pagosData.filter((p) => p.deuda_id === d.id),
+        restanteProxima: restanteDeCuota(pendientes[0]),
         cuotasPagadas: pagadas,
         porcentajePagado: Number(d.valor_inicial) > 0 ? 1 - saldoActual / Number(d.valor_inicial) : 0,
         proximaCuota: pendientes[0] ?? null,
@@ -181,6 +189,7 @@ export function useDeudas() {
       const { error: errInsert } = await supabase.from("cuotas_deuda").insert(nuevas.map((c) => ({ ...c, deuda_id: deudaId, estado: "pendiente" })));
       chequear(errInsert, "No se pudieron guardar las cuotas nuevas");
     }
+    await reaplicarPagos(deudaId); // vuelve a ubicar pagos parciales en las cuotas nuevas
     const { error: errPlazo } = await supabase
       .from("deudas")
       .update({ plazo_meses: pagadas.length + nuevas.length })
@@ -221,20 +230,31 @@ export function useDeudas() {
       fechaPrimerPago: datos.fechaPrimerPago,
       numeroInicial: 1,
       cuotasRestantes: datos.plazoMeses,
-    }).map((c) => {
-      const yaPaso = marcarVencidas && c.fecha_vencimiento < hoy;
-      return {
-        ...c,
-        deuda_id: creada.id,
-        estado: yaPaso ? "pagada" : "pendiente",
-        pagada_por: yaPaso ? "Registro inicial" : null,
-        fecha_pago: yaPaso ? c.fecha_vencimiento : null,
-      };
     });
-    const { error: errCuotas } = await supabase.from("cuotas_deuda").insert(cuotas);
+    const { error: errCuotas } = await supabase
+      .from("cuotas_deuda")
+      .insert(cuotas.map((c) => ({ ...c, deuda_id: creada.id, estado: "pendiente", valor_pagado: 0 })));
     if (errCuotas) {
       await supabase.from("deudas").delete().eq("id", creada.id);
       chequear(errCuotas, "No se pudieron crear las cuotas");
+    }
+
+    // Cuotas que ya se habían pagado antes de usar la app: quedan como "registro inicial"
+    const vencidas = marcarVencidas ? cuotas.filter((c) => c.fecha_vencimiento < hoy) : [];
+    if (vencidas.length) {
+      const yo = await nombreUsuarioActual();
+      const { error: errPagos } = await supabase.from("pagos_deuda").insert(
+        vencidas.map((c) => ({
+          deuda_id: creada.id,
+          fecha: c.fecha_vencimiento,
+          valor: c.cuota_total,
+          origen: "registro_inicial",
+          pagado_por: "Registro inicial",
+          registrado_por: yo.nombre,
+        }))
+      );
+      chequear(errPagos, "No se pudieron registrar las cuotas ya pagadas");
+      await reaplicarPagos(creada.id);
     }
     await cargar();
   }
@@ -253,26 +273,45 @@ export function useDeudas() {
     await cargar();
   }
 
-  /** Marca como pagada la cuota indicada y todas las anteriores que sigan pendientes. */
-  async function marcarPagadaHasta(deudaId: string, numeroCuota: number, fechaPago?: string) {
-    const nombre = await nombreUsuario();
-    const { error: err } = await supabase
-      .from("cuotas_deuda")
-      .update({ estado: "pagada", pagada_por: nombre, fecha_pago: fechaPago ?? hoyISO() })
-      .eq("deuda_id", deudaId)
-      .eq("estado", "pendiente")
-      .lte("numero_cuota", numeroCuota);
-    chequear(err, "No se pudo marcar el pago");
+  /**
+   * Pago hecho por una persona: queda como gasto (rubro "Créditos") y se aplica a las cuotas.
+   * Los pagos con arriendos se registran desde Propiedades.
+   */
+  async function registrarPago(deudaId: string, valor: number, fecha: string, persona: string) {
+    const deuda = deudas.find((d) => d.id === deudaId);
+    const yo = await nombreUsuarioActual();
+    const { data: gasto, error: errG } = await supabase
+      .from("gastos")
+      .insert({
+        fecha,
+        item: `Cuota ${deuda?.nombre ?? "crédito"}`,
+        valor: Math.round(valor),
+        moneda: "COP",
+        valor_cop: Math.round(valor),
+        usuario_pago_id: persona === yo.nombre ? yo.id : null,
+        usuario_pago_nombre: persona,
+        rubro: "Créditos",
+        es_compartido: true,
+        deuda_id: deudaId,
+      })
+      .select()
+      .single();
+    chequear(errG, "No se pudo registrar el gasto del pago");
+    try {
+      await registrarPagoDeuda({ deudaId, valor, fecha, origen: "persona", pagadoPor: persona, gastoId: gasto.id });
+    } catch (e) {
+      await supabase.from("gastos").delete().eq("id", gasto.id);
+      throw e;
+    }
     await cargar();
   }
 
-  /** Por si se marcó por error: la cuota vuelve a quedar pendiente. */
-  async function desmarcarPagada(cuotaId: string) {
-    const { error: err } = await supabase
-      .from("cuotas_deuda")
-      .update({ estado: "pendiente", pagada_por: null, fecha_pago: null })
-      .eq("id", cuotaId);
-    chequear(err, "No se pudo desmarcar la cuota");
+  /** Borra un pago registrado por error (y su gasto, si lo tiene). La cuota vuelve a quedar pendiente si ya no está cubierta. */
+  async function eliminarPago(pago: PagoDeudaRow) {
+    const { error: err } = await supabase.from("pagos_deuda").delete().eq("id", pago.id);
+    chequear(err, "No se pudo borrar el pago");
+    if (pago.gasto_id) await supabase.from("gastos").delete().eq("id", pago.gasto_id);
+    await reaplicarPagos(pago.deuda_id);
     await cargar();
   }
 
@@ -316,8 +355,8 @@ export function useDeudas() {
     crearDeuda,
     editarDeuda,
     eliminarDeuda,
-    marcarPagadaHasta,
-    desmarcarPagada,
+    registrarPago,
+    eliminarPago,
     registrarAbono,
     eliminarAbono,
     recargar: cargar,

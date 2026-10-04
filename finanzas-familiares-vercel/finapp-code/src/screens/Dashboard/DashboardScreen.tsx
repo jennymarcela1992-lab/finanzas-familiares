@@ -215,7 +215,7 @@ export default function DashboardScreen() {
           {actual.arriendos > 0 && <Desglose texto="Arriendos" valor={actual.arriendos} />}
           {actual.vehiculo > 0 && <Desglose texto="Vehículo" valor={actual.vehiculo} />}
           <Desglose texto="Gastos registrados" valor={-actual.gastos} />
-          {actual.cuotas > 0 && <Desglose texto="Cuotas de créditos" valor={-actual.cuotas} />}
+          {actual.cuotas > 0 && <Desglose texto="Pagos de créditos" valor={-actual.cuotas} />}
         </View>
       </Card>
 
