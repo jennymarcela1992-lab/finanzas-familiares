@@ -7,7 +7,7 @@ import { useCierreMensual } from "../../hooks/useCierreMensual";
 import { useAhorros } from "../../hooks/useAhorros";
 import { useAuth } from "../../hooks/useAuth";
 import { useVehiculos } from "../../hooks/useVehiculos";
-import { useDashboard, mesHoy, moverMes, PagoProximo } from "../../hooks/useDashboard";
+import { useDashboard, mesHoy, moverMes, PagoProximo, DatosDashboard, ItemPresupuesto } from "../../hooks/useDashboard";
 import { generarBackupJSON } from "../../utils/backup";
 import Card from "../../components/Card";
 import ProgressBar from "../../components/ProgressBar";
@@ -223,6 +223,9 @@ export default function DashboardScreen() {
           {actual.otrasSalidas > 0 && <Desglose texto="Inversiones y préstamos entregados" valor={-actual.otrasSalidas} />}
         </View>
       </Card>
+
+      {/* ---------- 1b. Presupuesto de pagos del mes ---------- */}
+      <Presupuesto datos={datos} mes={mes} ingresos={actual.ingresos} />
 
       {/* ---------- 2. Próximos pagos ---------- */}
       <Card>
@@ -460,6 +463,97 @@ function FilaPago({ p }: { p: PagoProximo }) {
         </View>
       </View>
     </View>
+  );
+}
+
+const ETIQUETA_TIPO: Record<ItemPresupuesto["tipo"], { t: string; i: any }> = {
+  credito: { t: "Créditos", i: "card" },
+  automatico: { t: "Gastos automáticos", i: "repeat" },
+  prestamo: { t: "Préstamos que debemos", i: "people" },
+};
+
+/** Cuánto se supone que hay que pagar en el mes (créditos y otros) y cuánto ya se pagó. */
+function Presupuesto({ datos, mes, ingresos }: { datos: DatosDashboard; mes: string; ingresos: number }) {
+  const [abierto, setAbierto] = useState(true);
+  const pr = datos.presupuesto;
+  const hoy = hoyISO();
+  const avance = pr.total > 0 ? pr.pagado / pr.total : 0;
+  const libre = ingresos - pr.total;
+  const tipos = (["credito", "automatico", "prestamo"] as const).filter((t) => pr.items.some((i) => i.tipo === t));
+  return (
+    <Card>
+      <TouchableOpacity onPress={() => setAbierto(!abierto)} style={styles.tituloFila}>
+        <View style={{ flex: 1 }}>
+          <Text style={typography.h3}>Presupuesto de pagos de {nombreMesSolo(mes)}</Text>
+          <Text style={typography.caption}>Lo que toca pagar en créditos y pagos fijos</Text>
+        </View>
+        <Ionicons name={abierto ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
+      </TouchableOpacity>
+      {pr.items.length === 0 ? (
+        <Text style={styles.vacio}>No hay cuotas de créditos ni gastos automáticos para este mes.</Text>
+      ) : (
+        <>
+          <View style={styles.tiles}>
+            <View style={styles.tile}>
+              <Text style={styles.tileTitulo}>A pagar</Text>
+              <Text style={[styles.tileValor, { fontSize: 15 }]} numberOfLines={1} adjustsFontSizeToFit>{pesos(pr.total)}</Text>
+            </View>
+            <View style={styles.tile}>
+              <Text style={styles.tileTitulo}>Ya pagado</Text>
+              <Text style={[styles.tileValor, { fontSize: 15, color: colors.success }]} numberOfLines={1} adjustsFontSizeToFit>{pesos(pr.pagado)}</Text>
+            </View>
+            <View style={styles.tile}>
+              <Text style={styles.tileTitulo}>Falta</Text>
+              <Text style={[styles.tileValor, { fontSize: 15 }, pr.pendiente > 0 && { color: colors.warning }]} numberOfLines={1} adjustsFontSizeToFit>{pesos(pr.pendiente)}</Text>
+            </View>
+          </View>
+          <View style={{ marginTop: spacing.sm }}>
+            <ProgressBar progreso={avance} />
+          </View>
+          <Text style={styles.ayuda}>
+            {tipos.map((t) => `${ETIQUETA_TIPO[t].t} ${pesos(pr.porTipo[t])}`).join(" · ")}
+            {ingresos > 0 ? ` · ${libre >= 0 ? "después de estos pagos quedan" : "faltan"} ${pesos(Math.abs(libre))} de las entradas del mes (${pesos(ingresos)})` : ""}
+          </Text>
+
+          {abierto &&
+            tipos.map((t) => (
+              <View key={t} style={{ marginTop: spacing.md }}>
+                <Text style={styles.subtitulo}>
+                  {ETIQUETA_TIPO[t].t} · {pesos(pr.porTipo[t])}
+                </Text>
+                {pr.items
+                  .filter((i) => i.tipo === t)
+                  .map((i, k) => {
+                    const falta = Math.max(0, i.valor - i.pagado);
+                    const pagado = falta < 1;
+                    const vencido = !pagado && i.fecha < hoy;
+                    return (
+                      <View key={k} style={styles.pagoFila}>
+                        <View style={styles.pagoIcono}>
+                          <Ionicons name={ETIQUETA_TIPO[t].i} size={15} color={colors.primary} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.pagoTitulo}>{i.nombre}</Text>
+                          <Text style={styles.pagoDetalle}>
+                            {formatoFecha(i.fecha)} · {i.detalle}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: "flex-end" }}>
+                          <Text style={styles.pagoValor}>{pesos(i.valor)}</Text>
+                          <View style={[styles.pill, pagado ? styles.pillSuccess : vencido ? styles.pillDanger : i.pagado > 0 ? styles.pillWarning : styles.pillNeutro]}>
+                            <Text style={[styles.pillText, pagado ? styles.pillTextSuccess : vencido ? { color: colors.danger } : i.pagado > 0 ? styles.pillTextWarning : { color: colors.textSecondary }]}>
+                              {pagado ? "Pagado" : vencido ? `Vencido · falta ${pesos(falta)}` : i.pagado > 0 ? `Falta ${pesos(falta)}` : "Pendiente"}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+              </View>
+            ))}
+        </>
+      )}
+    </Card>
   );
 }
 

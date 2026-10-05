@@ -104,7 +104,7 @@ export function cuotasSoloIntereses(monto: number, iMensual: number, fechaPrimer
 }
 
 /** Tabla de cuotas del préstamo y cómo los abonos recibidos las van cubriendo (en orden). */
-function construirCuotas(p: any, abonos: AbonoRow[], nombreDestino: (a: AbonoRow) => string): CuotaPrestamo[] {
+export function construirCuotas(p: any, abonos: AbonoRow[], nombreDestino: (a: AbonoRow) => string): CuotaPrestamo[] {
   if (!p.plazo_meses || !p.fecha_primer_pago) return [];
   const iMensual = tasaMensual(Number(p.tasa ?? 0), (p.tipo_tasa ?? "MV") as TipoTasa);
   const filas = p.solo_intereses

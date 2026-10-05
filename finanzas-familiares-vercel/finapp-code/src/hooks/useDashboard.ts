@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { construirCuotas } from "./usePrestamos";
 import { asegurarAutomaticos } from "../utils/automaticos";
 import { hoyISO, sumarMeses } from "../utils/amortizacion";
 import { personasDelHogar, aportesDelMes, esDelHogar, AportePersona } from "../utils/aportes";
@@ -42,6 +43,23 @@ export interface DeudaResumen {
   inicial: number;
 }
 
+export interface ItemPresupuesto {
+  tipo: "credito" | "automatico" | "prestamo";
+  nombre: string;
+  detalle: string;
+  fecha: string;
+  valor: number; // lo que toca pagar
+  pagado: number; // lo que ya se pagó de eso
+}
+
+export interface PresupuestoMes {
+  items: ItemPresupuesto[];
+  total: number;
+  pagado: number;
+  pendiente: number;
+  porTipo: { credito: number; automatico: number; prestamo: number };
+}
+
 export interface DatosDashboard {
   meses: MesBalance[]; // 6 meses, el último es el mes elegido
   actual: MesBalance;
@@ -57,6 +75,7 @@ export interface DatosDashboard {
   totalPropiedades: number; // valor comercial de las propiedades
   totalVehiculos: number; // valor comercial de los vehículos
   activos: { nombre: string; tipo: "propiedad" | "vehiculo"; valor: number; usoPropio: boolean }[];
+  presupuesto: PresupuestoMes; // pagos que toca hacer en el mes elegido
 }
 
 const mesDe = (fecha: string) => String(fecha).slice(0, 7);
@@ -96,7 +115,7 @@ export function useDashboard(mes: string) {
       supabase.from("vehiculos").select("*"),
       supabase.from("pagos_vehiculo").select("vehiculo_id, fecha, estado, monto").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("cuotas_deuda").select("deuda_id, numero_cuota, cuota_total, valor_pagado, capital, abono_extra, fecha_vencimiento, estado"),
-      supabase.from("deudas").select("id, nombre, valor_inicial, entidad_pago"),
+      supabase.from("deudas").select("*"),
       supabase.from("abonos_deuda").select("deuda_id, valor, fecha"),
       supabase.from("metas_ahorro").select("id, nombre, monto_objetivo"),
       supabase.from("aportes_ahorro").select("meta_id, monto"),
@@ -287,6 +306,9 @@ export function useDashboard(mes: string) {
       ...(rVeh.error ? [] : rVeh.data ?? []).map((v: any) => ({ nombre: v.nombre, tipo: "vehiculo" as const, valor: Number(v.valor_comercial) || 0, usoPropio: v.genera_ingresos === false })),
     ].filter((a) => a.valor > 0);
 
+    // ---------- Presupuesto de pagos del mes elegido ----------
+    const presupuesto = await armarPresupuesto(mes, (rCu.data ?? []) as any[], deudasInfo, hogar.personas);
+
     proximos.sort((a, b) => Number(b.vencido) - Number(a.vencido) || (a.fecha ?? "9999").localeCompare(b.fecha ?? "9999"));
 
     setDatos({
@@ -304,6 +326,7 @@ export function useDashboard(mes: string) {
       totalPropiedades: activos.filter((a) => a.tipo === "propiedad").reduce((s, a) => s + a.valor, 0),
       totalVehiculos: activos.filter((a) => a.tipo === "vehiculo").reduce((s, a) => s + a.valor, 0),
       activos,
+      presupuesto,
     });
     setError(null);
     setCargando(false);
@@ -314,4 +337,87 @@ export function useDashboard(mes: string) {
   }, [cargar]);
 
   return { datos, cargando, error, recargar: cargar };
+}
+
+
+/**
+ * Lo que se supone que hay que pagar en un mes: cuotas de créditos, gastos automáticos (recurrentes)
+ * y cuotas de préstamos que nos hicieron. Para cada uno, cuánto ya se pagó.
+ */
+async function armarPresupuesto(mes: string, cuotas: any[], deudasInfo: Map<string, any>, personas: string[]): Promise<PresupuestoMes> {
+  const items: ItemPresupuesto[] = [];
+  const inicio = `${mes}-01`;
+  const fin = `${mes}-31`;
+
+  // 1. Créditos: cada cuota que vence en el mes (los quincenales tienen dos)
+  cuotas
+    .filter((c) => mesDe(c.fecha_vencimiento) === mes)
+    .sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
+    .forEach((c) => {
+      const d = deudasInfo.get(c.deuda_id);
+      const valor = Number(c.cuota_total);
+      items.push({
+        tipo: "credito",
+        nombre: d?.nombre ?? "Crédito",
+        detalle: `Cuota #${c.numero_cuota}${d?.pago_automatico_por ? ` · débito automático de ${d.pago_automatico_por}` : d?.entidad_pago ? ` · ${d.entidad_pago}` : ""}`,
+        fecha: String(c.fecha_vencimiento).slice(0, 10),
+        valor,
+        pagado: c.estado === "pagada" ? valor : Math.min(valor, Number(c.valor_pagado ?? 0)),
+      });
+    });
+
+  // 2. Gastos automáticos activos en el mes
+  const [rRec, rGR] = await Promise.all([
+    supabase.from("gastos_recurrentes").select("*").eq("activo", true),
+    supabase.from("gastos").select("recurrente_id, valor, valor_cop, fecha, borrado").gte("fecha", inicio).lte("fecha", fin).not("recurrente_id", "is", null),
+  ]);
+  const gastosRec = ((rGR.error ? [] : rGR.data) ?? []).filter((g: any) => !g.borrado) as any[];
+  ((rRec.error ? [] : rRec.data) ?? []).forEach((r: any) => {
+    if (r.desde && String(r.desde).slice(0, 7) > mes) return;
+    if (r.hasta && String(r.hasta).slice(0, 7) < mes) return;
+    const ultimo = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)), 0)).getUTCDate();
+    const dia = Math.min(Number(r.dia) || 1, ultimo);
+    const valor = Number(r.valor);
+    const pagado = gastosRec.filter((g) => g.recurrente_id === r.id).reduce((s, g) => s + Number(g.valor_cop ?? g.valor), 0);
+    items.push({
+      tipo: "automatico",
+      nombre: r.item,
+      detalle: `${r.rubro ?? "Gasto"}${r.usuario_pago_nombre ? ` · paga ${r.usuario_pago_nombre}` : ""}`,
+      fecha: `${mes}-${String(dia).padStart(2, "0")}`,
+      valor,
+      pagado: Math.min(valor, pagado),
+    });
+  });
+
+  // 3. Préstamos que nos hicieron (pagamos nosotros) con cuotas en el mes
+  const [rPre, rAb] = await Promise.all([supabase.from("prestamos_personales").select("*"), supabase.from("abonos_prestamo").select("*")]);
+  ((rPre.error ? [] : rPre.data) ?? []).forEach((p: any) => {
+    const dir = ["prestamos", "nos_prestan", "interno"].includes(p.direccion)
+      ? p.direccion
+      : p.es_inversion
+      ? "prestamos"
+      : !esDelHogar(p.quien_presta, personas) && esDelHogar(p.quien_recibe, personas)
+      ? "nos_prestan"
+      : "otro";
+    if (dir !== "nos_prestan" || !p.plazo_meses || !p.fecha_primer_pago) return;
+    const abonos = ((rAb.error ? [] : rAb.data) ?? []).filter((a: any) => a.prestamo_id === p.id) as any[];
+    construirCuotas(p, abonos, () => "")
+      .filter((c) => mesDe(c.fecha_vencimiento) === mes)
+      .forEach((c) =>
+        items.push({
+          tipo: "prestamo",
+          nombre: `Préstamo de ${p.quien_presta}`,
+          detalle: `Cuota #${c.numero_cuota}`,
+          fecha: c.fecha_vencimiento,
+          valor: Math.round(c.cuota_total),
+          pagado: Math.min(Math.round(c.cuota_total), c.valor_pagado),
+        })
+      );
+  });
+
+  items.sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const total = items.reduce((s, i) => s + i.valor, 0);
+  const pagado = items.reduce((s, i) => s + i.pagado, 0);
+  const suma = (t: ItemPresupuesto["tipo"]) => items.filter((i) => i.tipo === t).reduce((s, i) => s + i.valor, 0);
+  return { items, total, pagado, pendiente: Math.max(0, total - pagado), porTipo: { credito: suma("credito"), automatico: suma("automatico"), prestamo: suma("prestamo") } };
 }
