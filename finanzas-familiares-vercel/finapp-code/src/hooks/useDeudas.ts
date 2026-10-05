@@ -348,11 +348,44 @@ export function useDeudas() {
   }
 
   /** Cambia los datos del crédito y recalcula las cuotas que faltan (las pagadas no se tocan). */
+  /**
+   * Guarda los cambios del crédito. Las cuotas pendientes solo se recalculan si cambió algo que las afecta,
+   * y por defecto se MANTIENE la cuota actual (antes, editar cualquier dato —ej. el débito automático o la propiedad—
+   * volvía a calcular la cuota con el plazo original y la subía).
+   *  - Cuota fija definida → se usa esa cuota.
+   *  - Cambió el plazo (o se quitó la cuota fija) → se recalcula la cuota para terminar en ese plazo.
+   *  - Cambió valor, tasa, seguro o frecuencia → se mantiene la cuota y se ajusta el plazo.
+   *  - Solo cambiaron datos sin efecto en las cuotas (nombre, cuenta, propiedad, débito…) → las cuotas no se tocan.
+   */
   async function editarDeuda(id: string, datos: DatosDeuda) {
+    const antes = deudas.find((d) => d.id === id);
     const { error: err } = await supabase.from("deudas").update(filaDeuda(datos)).eq("id", id);
     chequear(err, "No se pudo guardar el cambio");
     if (datos.vinculos) await guardarVinculos(id, datos.vinculos);
-    await recalcularPendientes(id);
+
+    const fijaAntes = Number(antes?.cuota_fija) || 0;
+    const fijaNueva = datos.cuotaFija === undefined ? fijaAntes : Number(datos.cuotaFija) || 0;
+    const cambioPlazo = !antes || Number(antes.plazo_meses) !== Number(datos.plazoMeses);
+    const cambioCuotas =
+      !antes ||
+      Math.round(Number(antes.valor_inicial)) !== Math.round(datos.valorInicial) ||
+      Number(antes.tasa_interes) !== Number(datos.tasa) ||
+      (antes.tipo_tasa ?? "MV") !== datos.tipoTasa ||
+      Math.round(Number(antes.seguro_mensual ?? 0)) !== Math.round(datos.seguroMensual || 0) ||
+      (antes.frecuencia ?? "mensual") !== (datos.frecuencia ?? "mensual") ||
+      antes.primerPago !== datos.fechaPrimerPago;
+
+    if (fijaNueva > 0) {
+      if (fijaNueva !== fijaAntes || cambioCuotas) await recalcularPendientes(id); // usa la cuota fija
+    } else if (fijaAntes > 0 || cambioPlazo) {
+      await recalcularPendientes(id); // nuevo plazo: la cuota se calcula para terminar en ese plazo
+    } else if (cambioCuotas) {
+      try {
+        await recalcularPendientes(id, { mantenerCuota: true });
+      } catch {
+        await recalcularPendientes(id); // la cuota ya no alcanza (ej. subió la tasa): se recalcula con el plazo
+      }
+    }
     await cargar();
   }
 

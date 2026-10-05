@@ -399,7 +399,10 @@ export default function DeudasScreen() {
             </View>
           )}
 
-          {editandoId && <Text style={styles.ayuda}>Al guardar, se recalculan las cuotas pendientes. Las cuotas ya pagadas no cambian.</Text>}
+          {editandoId && <Text style={styles.ayuda}>
+              Al guardar se mantiene la cuota actual (si cambias valor o tasa, se ajusta el plazo). Solo si cambias el plazo o pones una cuota fija, la cuota se recalcula. Las cuotas ya pagadas no
+              cambian.
+            </Text>}
 
           {activos.length > 0 && (
             <>
