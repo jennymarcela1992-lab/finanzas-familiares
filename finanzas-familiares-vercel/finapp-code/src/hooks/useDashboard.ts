@@ -44,7 +44,8 @@ export interface DeudaResumen {
 }
 
 export interface ItemPresupuesto {
-  tipo: "credito" | "automatico" | "prestamo";
+  tipo: "credito" | "automatico" | "prestamo" | "aporte" | "arriendo" | "vehiculo" | "cobro_prestamo";
+  sinEstado?: boolean; // ej. aportes: se asumen, no se marcan como recibidos
   nombre: string;
   detalle: string;
   fecha: string;
@@ -57,7 +58,7 @@ export interface PresupuestoMes {
   total: number;
   pagado: number;
   pendiente: number;
-  porTipo: { credito: number; automatico: number; prestamo: number };
+  porTipo: Partial<Record<ItemPresupuesto["tipo"], number>>;
 }
 
 export interface DatosDashboard {
@@ -76,6 +77,7 @@ export interface DatosDashboard {
   totalVehiculos: number; // valor comercial de los vehículos
   activos: { nombre: string; tipo: "propiedad" | "vehiculo"; valor: number; usoPropio: boolean }[];
   presupuesto: PresupuestoMes; // pagos que toca hacer en el mes elegido
+  presupuestoIngresos: PresupuestoMes; // lo que se espera recibir en el mes elegido
 }
 
 const mesDe = (fecha: string) => String(fecha).slice(0, 7);
@@ -308,6 +310,17 @@ export function useDashboard(mes: string) {
 
     // ---------- Presupuesto de pagos del mes elegido ----------
     const presupuesto = await armarPresupuesto(mes, (rCu.data ?? []) as any[], deudasInfo, hogar.personas);
+    const presupuestoIngresos = await armarIngresos(
+      mes,
+      aportesPorMes.get(mes) ?? [],
+      rProp.error ? [] : ((rProp.data ?? []) as any[]),
+      contratosFilas,
+      ipc,
+      (rArr.data ?? []) as any[],
+      rVeh.error ? [] : ((rVeh.data ?? []) as any[]),
+      (rPV.data ?? []) as any[],
+      hogar.personas
+    );
 
     proximos.sort((a, b) => Number(b.vencido) - Number(a.vencido) || (a.fecha ?? "9999").localeCompare(b.fecha ?? "9999"));
 
@@ -327,6 +340,7 @@ export function useDashboard(mes: string) {
       totalVehiculos: activos.filter((a) => a.tipo === "vehiculo").reduce((s, a) => s + a.valor, 0),
       activos,
       presupuesto,
+      presupuestoIngresos,
     });
     setError(null);
     setCargando(false);
@@ -420,4 +434,116 @@ async function armarPresupuesto(mes: string, cuotas: any[], deudasInfo: Map<stri
   const pagado = items.reduce((s, i) => s + i.pagado, 0);
   const suma = (t: ItemPresupuesto["tipo"]) => items.filter((i) => i.tipo === t).reduce((s, i) => s + i.valor, 0);
   return { items, total, pagado, pendiente: Math.max(0, total - pagado), porTipo: { credito: suma("credito"), automatico: suma("automatico"), prestamo: suma("prestamo") } };
+}
+
+function resumir(items: ItemPresupuesto[]): PresupuestoMes {
+  items.sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const total = items.reduce((s, i) => s + i.valor, 0);
+  const pagado = items.reduce((s, i) => s + i.pagado, 0);
+  const porTipo: PresupuestoMes["porTipo"] = {};
+  items.forEach((i) => (porTipo[i.tipo] = (porTipo[i.tipo] ?? 0) + i.valor));
+  return { items, total, pagado, pendiente: Math.max(0, items.reduce((s, i) => s + Math.max(0, i.valor - i.pagado), 0)), porTipo };
+}
+
+/**
+ * Lo que se espera recibir en un mes: aportes de cada persona, todos los arriendos con contrato vigente
+ * (con su aumento por IPC), la renta diaria de los vehículos rentados y las cuotas de préstamos que nos deben.
+ */
+async function armarIngresos(
+  mes: string,
+  aportes: AportePersona[],
+  propiedades: any[],
+  contratosFilas: any[] | null,
+  ipc: Record<number, number>,
+  arriendosMes: any[],
+  vehiculos: any[],
+  pagosVehiculo: any[],
+  personas: string[]
+): Promise<PresupuestoMes> {
+  const items: ItemPresupuesto[] = [];
+  const inicio = `${mes}-01`;
+  const ultimoDia = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)), 0)).getUTCDate();
+  const fin = `${mes}-${String(ultimoDia).padStart(2, "0")}`;
+
+  // 1. Aportes de cada persona
+  aportes.forEach((a) =>
+    items.push({ tipo: "aporte", nombre: a.nombre, detalle: a.esBase ? "Aporte base" : "Aporte ajustado este mes", fecha: inicio, valor: a.aporte, pagado: a.aporte, sinEstado: true })
+  );
+
+  // 2. Arriendos: cada propiedad con contrato vigente en el mes
+  propiedades.forEach((p) => {
+    if (p.genera_ingresos === false) return;
+    const fechaPago = fechaPagoArriendo(mes, null);
+    const info = arriendoDePropiedad(p, contratosFilas, ipc, fin);
+    const c = info.contrato && info.contrato.fecha_inicio <= fin ? info.contrato : null;
+    const recibido = arriendosMes.filter((a) => a.propiedad_id === p.id && a.mes === mes).reduce((s, a) => s + Number(a.monto), 0);
+    if (!c && recibido <= 0) return;
+    const dia = fechaPagoArriendo(mes, c?.dia_pago ?? p.dia_pago_arriendo);
+    const valor = c ? arriendoDePropiedad(p, contratosFilas, ipc, dia).valor?.valor ?? recibido : recibido;
+    items.push({
+      tipo: "arriendo",
+      nombre: p.nombre,
+      detalle: c?.arrendatario ? `Arriendo · ${c.arrendatario}` : "Arriendo",
+      fecha: dia || fechaPago,
+      valor: Math.round(valor),
+      pagado: Math.round(Math.min(recibido, valor || recibido)),
+    });
+  });
+
+  // 3. Vehículos rentados: cuota diaria de todos los días que se cobran en el mes (sin descanso ni pico y placa)
+  const rentados = vehiculos.filter((v) => v.genera_ingresos !== false && Number(v.cuota_diaria) > 0);
+  if (rentados.length) {
+    const { data: pp } = await supabase.from("vehiculo_pico_placa").select("*");
+    rentados.forEach((v) => {
+      const periodos = ((pp ?? []) as any[]).filter((x) => x.vehiculo_id === v.id);
+      let dias = 0;
+      for (let d = 1; d <= ultimoDia; d++) {
+        const f = `${mes}-${String(d).padStart(2, "0")}`;
+        const ds = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)) - 1, d)).getUTCDay();
+        const vig = periodos.filter((x) => x.desde <= f).sort((a, b) => String(b.desde).localeCompare(String(a.desde)))[0];
+        if (ds === Number(v.dia_descanso) || (vig && Number(vig.dia_semana) === ds)) continue;
+        dias++;
+      }
+      const recibido = pagosVehiculo
+        .filter((x) => x.vehiculo_id === v.id && x.estado === "pagado" && mesDe(x.fecha) === mes)
+        .reduce((s, x) => s + Number(x.monto ?? v.cuota_diaria), 0);
+      const valor = dias * Number(v.cuota_diaria);
+      items.push({
+        tipo: "vehiculo",
+        nombre: `${v.nombre}${v.placa ? ` · ${v.placa}` : ""}`,
+        detalle: `${dias} días × ${Math.round(Number(v.cuota_diaria)).toLocaleString("es-CO")}${v.arrendatario ? ` · ${v.arrendatario}` : ""}`,
+        fecha: fin,
+        valor,
+        pagado: Math.min(valor, recibido),
+      });
+    });
+  }
+
+  // 4. Préstamos que hicimos: cuotas que nos deben pagar en el mes
+  const [rPre, rAb] = await Promise.all([supabase.from("prestamos_personales").select("*"), supabase.from("abonos_prestamo").select("*")]);
+  ((rPre.error ? [] : rPre.data) ?? []).forEach((p: any) => {
+    const dir = ["prestamos", "nos_prestan", "interno"].includes(p.direccion)
+      ? p.direccion
+      : p.es_inversion
+      ? "prestamos"
+      : esDelHogar(p.quien_presta, personas) && !esDelHogar(p.quien_recibe, personas)
+      ? "prestamos"
+      : "otro";
+    if (dir !== "prestamos" || !p.plazo_meses || !p.fecha_primer_pago) return;
+    const abonos = ((rAb.error ? [] : rAb.data) ?? []).filter((a: any) => a.prestamo_id === p.id) as any[];
+    construirCuotas(p, abonos, () => "")
+      .filter((c) => mesDe(c.fecha_vencimiento) === mes)
+      .forEach((c) =>
+        items.push({
+          tipo: "cobro_prestamo",
+          nombre: `Préstamo a ${p.quien_recibe}`,
+          detalle: `Cuota #${c.numero_cuota} · interés ${Math.round(c.interes).toLocaleString("es-CO")}`,
+          fecha: c.fecha_vencimiento,
+          valor: Math.round(c.cuota_total),
+          pagado: Math.min(Math.round(c.cuota_total), c.valor_pagado),
+        })
+      );
+  });
+
+  return resumir(items);
 }
