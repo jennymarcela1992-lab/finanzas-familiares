@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { todo } from "../utils/consultas";
 import { construirCuotas } from "./usePrestamos";
 import { asegurarAutomaticos } from "../utils/automaticos";
 import { hoyISO, sumarMeses } from "../utils/amortizacion";
@@ -112,17 +113,17 @@ export function useDashboard(mes: string) {
     const rDes = await supabase.from("desembolsos_deuda").select("deuda_id, valor, fecha");
     const desembolsosTodos = (rDes.error ? [] : rDes.data ?? []) as any[];
     const [rG, rArr, rVeh, rPV, rCu, rDeu, rAb, rMet, rApo, rProp, rPag] = await Promise.all([
-      supabase.from("gastos").select("id, fecha, valor, valor_cop, rubro, borrado, deuda_id").gte("fecha", desde).lt("fecha", hasta),
+      todo(() => supabase.from("gastos").select("id, fecha, valor, valor_cop, rubro, borrado, deuda_id").gte("fecha", desde).lt("fecha", hasta).order("id")),
       supabase.from("arriendos_recibidos").select("propiedad_id, mes, monto").gte("mes", meses[0]).lte("mes", mes),
       supabase.from("vehiculos").select("*"),
-      supabase.from("pagos_vehiculo").select("vehiculo_id, fecha, estado, monto").gte("fecha", desde).lt("fecha", hasta),
-      supabase.from("cuotas_deuda").select("deuda_id, numero_cuota, cuota_total, valor_pagado, capital, abono_extra, fecha_vencimiento, estado"),
+      todo(() => supabase.from("pagos_vehiculo").select("id, vehiculo_id, fecha, estado, monto").gte("fecha", desde).lt("fecha", hasta).order("id")),
+      todo(() => supabase.from("cuotas_deuda").select("id, deuda_id, numero_cuota, cuota_total, valor_pagado, capital, abono_extra, fecha_vencimiento, estado").order("id")),
       supabase.from("deudas").select("*"),
-      supabase.from("abonos_deuda").select("deuda_id, valor, fecha"),
+      todo(() => supabase.from("abonos_deuda").select("id, deuda_id, valor, fecha").order("id")),
       supabase.from("metas_ahorro").select("id, nombre, monto_objetivo"),
       supabase.from("aportes_ahorro").select("meta_id, monto"),
       supabase.from("propiedades").select("*"),
-      supabase.from("pagos_deuda").select("fecha, valor, origen, gasto_id").gte("fecha", desde).lt("fecha", hasta),
+      todo(() => supabase.from("pagos_deuda").select("id, fecha, valor, origen, gasto_id").gte("fecha", desde).lt("fecha", hasta).order("id")),
     ]);
 
     const fallo = [rG, rCu, rDeu, rMet, rApo].find((r) => r.error);
@@ -404,7 +405,7 @@ async function armarPresupuesto(mes: string, cuotas: any[], deudasInfo: Map<stri
   });
 
   // 3. Préstamos que nos hicieron (pagamos nosotros) con cuotas en el mes
-  const [rPre, rAb] = await Promise.all([supabase.from("prestamos_personales").select("*"), supabase.from("abonos_prestamo").select("*")]);
+  const [rPre, rAb] = await Promise.all([supabase.from("prestamos_personales").select("*"), todo(() => supabase.from("abonos_prestamo").select("*").order("id"))]);
   ((rPre.error ? [] : rPre.data) ?? []).forEach((p: any) => {
     const dir = ["prestamos", "nos_prestan", "interno"].includes(p.direccion)
       ? p.direccion
@@ -520,7 +521,7 @@ async function armarIngresos(
   }
 
   // 4. Préstamos que hicimos: cuotas que nos deben pagar en el mes
-  const [rPre, rAb] = await Promise.all([supabase.from("prestamos_personales").select("*"), supabase.from("abonos_prestamo").select("*")]);
+  const [rPre, rAb] = await Promise.all([supabase.from("prestamos_personales").select("*"), todo(() => supabase.from("abonos_prestamo").select("*").order("id"))]);
   ((rPre.error ? [] : rPre.data) ?? []).forEach((p: any) => {
     const dir = ["prestamos", "nos_prestan", "interno"].includes(p.direccion)
       ? p.direccion

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { todo } from "../utils/consultas";
 
 export interface MovimientoRow {
   id: string;
@@ -44,7 +45,7 @@ export function useInversiones() {
       setCargando(false);
       return;
     }
-    const { data: movData, error: errM } = await supabase.from("movimientos_inversion").select("*").order("fecha", { ascending: false });
+    const { data: movData, error: errM } = await todo(() => supabase.from("movimientos_inversion").select("*").order("fecha", { ascending: false }).order("id"));
     if (errM) {
       setError(errM.message);
       setCargando(false);

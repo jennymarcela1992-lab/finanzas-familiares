@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { todo } from "../utils/consultas";
 import { hoyISO } from "../utils/amortizacion";
 import { cargarVinculos } from "../utils/deudaActivos";
 
@@ -134,11 +135,11 @@ export function useVehiculos() {
     setCargando(true);
     const [rV, rP, rPP, rG, rD, rPag, vinculos] = await Promise.all([
       supabase.from("vehiculos").select("*").order("creado_en", { ascending: false }),
-      supabase.from("pagos_vehiculo").select("*").order("fecha", { ascending: false }),
+      todo(() => supabase.from("pagos_vehiculo").select("*").order("fecha", { ascending: false }).order("id")),
       supabase.from("vehiculo_pico_placa").select("*").order("desde", { ascending: false }),
-      supabase.from("gastos").select("id, item, valor, valor_cop, fecha, rubro, vehiculo_id, borrado").not("vehiculo_id", "is", null),
+      todo(() => supabase.from("gastos").select("id, item, valor, valor_cop, fecha, rubro, vehiculo_id, borrado").not("vehiculo_id", "is", null).order("id")),
       supabase.from("deudas").select("id, nombre"),
-      supabase.from("pagos_deuda").select("deuda_id, valor, fecha, origen"),
+      todo(() => supabase.from("pagos_deuda").select("id, deuda_id, valor, fecha, origen").order("id")),
       cargarVinculos(),
     ]);
     if (rV.error || rP.error) {

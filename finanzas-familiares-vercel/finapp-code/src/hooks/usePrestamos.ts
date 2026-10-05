@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { todo } from "../utils/consultas";
 import { TipoTasa, tasaMensual, tasaPeriodo, generarCuotas, fechaCuota, hoyISO, FilaCuota } from "../utils/amortizacion";
 import { registrarPagoDeuda, reaplicarPagos } from "../utils/pagosDeuda";
 import { personasDelHogar, esDelHogar } from "../utils/aportes";
@@ -155,7 +156,7 @@ export function usePrestamos() {
     setCargando(true);
     const [rP, rA, rD, hogar] = await Promise.all([
       supabase.from("prestamos_personales").select("*").order("fecha", { ascending: false }),
-      supabase.from("abonos_prestamo").select("*").order("fecha", { ascending: false }),
+      todo(() => supabase.from("abonos_prestamo").select("*").order("fecha", { ascending: false }).order("id")),
       supabase.from("deudas").select("*"),
       personasDelHogar(),
     ]);

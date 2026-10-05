@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { todo } from "../utils/consultas";
 import { registrarPagoDeuda, restanteDeCuota, reaplicarPagos } from "../utils/pagosDeuda";
 import { hoyISO, sumarMeses } from "../utils/amortizacion";
 import { arriendoDePropiedad, fechaPagoArriendo, diasEntre, ValorArriendo, ContratoArriendo } from "../utils/arriendo";
@@ -111,12 +112,12 @@ export function usePropiedades() {
     setCargando(true);
     const [rP, rA, rI, rD, rC, rG, rPag, rK, vinculos] = await Promise.all([
       supabase.from("propiedades").select("*").order("creado_en", { ascending: false }),
-      supabase.from("arriendos_recibidos").select("*").order("fecha", { ascending: false }),
+      todo(() => supabase.from("arriendos_recibidos").select("*").order("fecha", { ascending: false }).order("id")),
       supabase.from("ipc_anual").select("*"),
       supabase.from("deudas").select("*"),
-      supabase.from("cuotas_deuda").select("deuda_id, numero_cuota, cuota_total, valor_pagado, fecha_vencimiento, estado").eq("estado", "pendiente").order("numero_cuota"),
-      supabase.from("gastos").select("id, item, valor, valor_cop, fecha, propiedad_id, borrado").not("propiedad_id", "is", null),
-      supabase.from("pagos_deuda").select("deuda_id, valor, fecha, origen"),
+      todo(() => supabase.from("cuotas_deuda").select("id, deuda_id, numero_cuota, cuota_total, valor_pagado, fecha_vencimiento, estado").eq("estado", "pendiente").order("numero_cuota").order("id")),
+      todo(() => supabase.from("gastos").select("id, item, valor, valor_cop, fecha, propiedad_id, borrado").not("propiedad_id", "is", null).order("id")),
+      todo(() => supabase.from("pagos_deuda").select("id, deuda_id, valor, fecha, origen").order("id")),
       supabase.from("contratos_arriendo").select("*"),
       cargarVinculos(),
     ]);

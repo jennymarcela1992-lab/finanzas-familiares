@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { todo } from "../utils/consultas";
 import { cargarVinculos, guardarVinculos, VinculoActivo } from "../utils/deudaActivos";
 import { TipoTasa, Frecuencia, PeriodoAbono, tasaPeriodo, abonoVigenteEn, generarCuotas, sumarMeses, hoyISO, fechaCuota, proyectarCuotas, EventoCredito } from "../utils/amortizacion";
 import { asegurarAutomaticos } from "../utils/automaticos";
@@ -147,10 +148,10 @@ export function useDeudas() {
     await asegurarAutomaticos(); // registra débitos automáticos y gastos recurrentes que ya vencieron
     const [rD, rC, rA, rP, rX, rM] = await Promise.all([
       supabase.from("deudas").select("*").order("creado_en", { ascending: false }),
-      supabase.from("cuotas_deuda").select("*").order("numero_cuota", { ascending: true }),
-      supabase.from("abonos_deuda").select("*").order("fecha", { ascending: true }),
-      supabase.from("pagos_deuda").select("*").order("fecha", { ascending: false }),
-      supabase.from("desembolsos_deuda").select("*").order("fecha", { ascending: true }),
+      todo(() => supabase.from("cuotas_deuda").select("*").order("numero_cuota", { ascending: true }).order("id")),
+      todo(() => supabase.from("abonos_deuda").select("*").order("fecha", { ascending: true }).order("id")),
+      todo(() => supabase.from("pagos_deuda").select("*").order("fecha", { ascending: false }).order("id")),
+      todo(() => supabase.from("desembolsos_deuda").select("*").order("fecha", { ascending: true }).order("id")),
       supabase.from("abonos_mensuales_deuda").select("*"),
     ]);
     const vinculosTodos = await cargarVinculos();
