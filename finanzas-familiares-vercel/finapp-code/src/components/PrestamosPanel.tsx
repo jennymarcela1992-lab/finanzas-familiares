@@ -40,7 +40,11 @@ interface Props {
 }
 
 const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPanel({ modo, onFormCambia }, ref) {
-  const { prestamos, cargando, error, crearPrestamo, editarPrestamo, eliminarPrestamo, registrarAbono, eliminarAbono } = usePrestamos();
+  const { prestamos, cargando, error, crearPrestamo, editarPrestamo, eliminarPrestamo, registrarAbono, eliminarAbono, marcarPagadasHasta, deshacerPagadas } = usePrestamos();
+  const [valorCredito, setValorCredito] = useState("");
+  // cuotas que ya estaban pagadas antes de usar la app
+  const [yaPagadasDe, setYaPagadasDe] = useState<PrestamoConAbonos | null>(null);
+  const [hastaPagadas, setHastaPagadas] = useState("2026-09-30");
   const { personas } = usePersonas();
   const { deudas, recargar: recargarDeudas } = useDeudas();
 
@@ -142,10 +146,47 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
 
   function abrirPago(p: PrestamoConAbonos) {
     setPagoDe(p);
-    setMonto(Math.round(p.conCuotas ? p.restanteProxima : p.saldoPendiente).toLocaleString("es-CO"));
+    const m = Math.round(p.conCuotas ? p.restanteProxima : p.saldoPendiente);
+    setMonto(m.toLocaleString("es-CO"));
     setFecha(hoyISO());
-    setDestino("hogar");
     setNota("");
+    // como el arriendo: si el dinero salió de un crédito, se sugiere usar el pago para la cuota de ese crédito
+    const origen = p.direccion !== "nos_prestan" && p.deuda_origen_id ? deudas.find((d) => d.id === p.deuda_origen_id && d.proximaCuota) : null;
+    if (origen) {
+      setDestino(`c:${origen.id}`);
+      setValorCredito(Math.min(m, origen.restanteProxima).toLocaleString("es-CO"));
+    } else {
+      setDestino("hogar");
+      setValorCredito("");
+    }
+  }
+
+  function elegirDestino(d: string) {
+    setDestino(d);
+    if (d.startsWith("c:")) {
+      const deuda = deudas.find((x) => x.id === d.slice(2));
+      if (deuda) setValorCredito(Math.min(aNumero(monto) || 0, deuda.restanteProxima).toLocaleString("es-CO"));
+    }
+  }
+
+  function abrirYaPagadas(p: PrestamoConAbonos) {
+    const hoy = hoyISO();
+    setHastaPagadas(hoy < "2026-09-30" ? hoy : "2026-09-30");
+    setYaPagadasDe(p);
+  }
+
+  async function guardarYaPagadas() {
+    if (!yaPagadasDe) return;
+    setGuardando(true);
+    try {
+      const n = await marcarPagadasHasta(yaPagadasDe, hastaPagadas);
+      setYaPagadasDe(null);
+      Alert.alert("Listo", n ? `${n} cuota(s) quedaron como pagadas. No cuentan como ingreso de esos meses.` : "No había cuotas pendientes hasta esa fecha.");
+    } catch (e: any) {
+      Alert.alert("Error", e.message ?? "No se pudieron marcar las cuotas.");
+    } finally {
+      setGuardando(false);
+    }
   }
 
   async function guardarPago() {
@@ -154,7 +195,12 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
     if (!(v > 0)) return Alert.alert("Falta el valor", "Escribe cuánto pagaron.");
     let dest: DestinoAbono = { tipo: "hogar" };
     if (destino.startsWith("p:")) dest = { tipo: "persona", persona: destino.slice(2) };
-    if (destino.startsWith("c:")) dest = { tipo: "credito", deudaId: destino.slice(2) };
+    if (destino.startsWith("c:")) {
+      const vc = aNumero(valorCredito);
+      if (!(vc > 0)) return Alert.alert("Falta el valor", "Escribe cuánto de este pago va al crédito.");
+      if (vc > v) return Alert.alert("Valor no válido", "Lo que va al crédito no puede ser mayor que el pago recibido.");
+      dest = { tipo: "credito", deudaId: destino.slice(2), valor: vc };
+    }
     setGuardando(true);
     try {
       await registrarAbono(pagoDe.id, v, fecha, dest, nota.trim() || undefined);
@@ -168,7 +214,12 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
   }
 
   function destinoTexto(a: AbonoRow) {
-    if (a.deuda_id) return `pagó ${deudas.find((d) => d.id === a.deuda_id)?.nombre ?? "un crédito"}`;
+    if (a.registro_inicial) return "ya estaba pagada (antes de la app)";
+    if (a.deuda_id) {
+      const nombre = deudas.find((d) => d.id === a.deuda_id)?.nombre ?? "un crédito";
+      const vc = Number(a.valor_credito ?? a.monto);
+      return vc < Number(a.monto) - 0.5 ? `${pesos(vc)} pagó ${nombre}, ${pesos(Number(a.monto) - vc)} quedó en el hogar` : `pagó ${nombre}`;
+    }
     if (a.destino_persona) return `para ${a.destino_persona}`;
     return "quedó en el hogar";
   }
@@ -305,6 +356,12 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
               <Text style={styles.accionTxt}>Registrar pago</Text>
             </TouchableOpacity>
           )}
+          {p.conCuotas && (p.cuotas.some((c) => c.estado === "pendiente" && c.fecha_vencimiento <= hoyISO()) || p.abonos.some((a) => a.registro_inicial)) && (
+            <TouchableOpacity style={styles.accion} onPress={() => abrirYaPagadas(p)}>
+              <Ionicons name="checkmark-done" size={15} color={colors.primary} />
+              <Text style={styles.accionTxt}>Cuotas ya pagadas</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.accion} onPress={() => abrirEdicion(p)}>
             <Ionicons name="create" size={15} color={colors.primary} />
             <Text style={styles.accionTxt}>Editar</Text>
@@ -344,7 +401,7 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
                   ])
                 }
               >
-                <Ionicons name={a.deuda_id ? "card" : a.destino_persona ? "person" : "home"} size={14} color={colors.primary} />
+                <Ionicons name={a.registro_inicial ? "checkmark-done" : a.deuda_id ? "card" : a.destino_persona ? "person" : "home"} size={14} color={a.registro_inicial ? colors.textMuted : colors.primary} />
                 <Text style={[styles.listaTxt, { flex: 1 }]}>
                   {formatoFecha(a.fecha)} · <Text style={{ fontWeight: "700" }}>{pesos(Number(a.monto))}</Text> · {destinoTexto(a)}
                   {a.nota ? ` · ${a.nota}` : ""}
@@ -488,29 +545,47 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
                 <Text style={styles.label}>{esNosPrestan ? "¿Quién hizo el pago?" : "¿A dónde fue este dinero?"}</Text>
                 <View style={styles.chips}>
                   {!esNosPrestan && (
-                    <TouchableOpacity onPress={() => setDestino("hogar")} style={[styles.chip, destino === "hogar" && styles.chipActivo]}>
+                    <TouchableOpacity onPress={() => elegirDestino("hogar")} style={[styles.chip, destino === "hogar" && styles.chipActivo]}>
                       <Text style={[styles.chipTxt, destino === "hogar" && styles.chipTxtActivo]}>Queda en el hogar</Text>
                     </TouchableOpacity>
                   )}
                   {personas.map((n) => (
-                    <TouchableOpacity key={n} onPress={() => setDestino(`p:${n}`)} style={[styles.chip, destino === `p:${n}` && styles.chipActivo]}>
+                    <TouchableOpacity key={n} onPress={() => elegirDestino(`p:${n}`)} style={[styles.chip, destino === `p:${n}` && styles.chipActivo]}>
                       <Text style={[styles.chipTxt, destino === `p:${n}` && styles.chipTxtActivo]}>{esNosPrestan ? n : `Para ${n}`}</Text>
                     </TouchableOpacity>
                   ))}
                   {!esNosPrestan &&
                     deudas
                       .filter((d) => d.proximaCuota)
+                      .sort((a, b) => Number(b.id === pagoDe.deuda_origen_id) - Number(a.id === pagoDe.deuda_origen_id))
                       .map((d) => (
-                        <TouchableOpacity key={d.id} onPress={() => setDestino(`c:${d.id}`)} style={[styles.chip, destino === `c:${d.id}` && styles.chipActivo]}>
-                          <Text style={[styles.chipTxt, destino === `c:${d.id}` && styles.chipTxtActivo]}>Pagar {d.nombre}</Text>
+                        <TouchableOpacity key={d.id} onPress={() => elegirDestino(`c:${d.id}`)} style={[styles.chip, destino === `c:${d.id}` && styles.chipActivo]}>
+                          <Text style={[styles.chipTxt, destino === `c:${d.id}` && styles.chipTxtActivo]}>
+                            Abonar a {d.nombre}
+                            {d.id === pagoDe.deuda_origen_id ? " (origen del dinero)" : ""}
+                          </Text>
                         </TouchableOpacity>
                       ))}
                 </View>
-                {destino.startsWith("c:") && (
-                  <Text style={styles.ayuda}>
-                    Se registra como pago de la cuota de {deudas.find((d) => d.id === destino.slice(2))?.nombre}: falta {pesos(deudas.find((d) => d.id === destino.slice(2))?.restanteProxima ?? 0)}.
-                  </Text>
-                )}
+                {destino.startsWith("c:") &&
+                  (() => {
+                    const dd = deudas.find((d) => d.id === destino.slice(2));
+                    if (!dd?.proximaCuota) return null;
+                    const vm = aNumero(monto);
+                    const vc = aNumero(valorCredito);
+                    return (
+                      <View style={styles.previa}>
+                        <Text style={styles.previaTxt}>
+                          {dd.nombre}: cuota #{dd.proximaCuota.numero_cuota} vence {formatoFecha(dd.proximaCuota.fecha_vencimiento)} · falta {pesos(dd.restanteProxima)}
+                          {dd.entidad_pago ? ` · se paga en ${dd.entidad_pago}` : ""}
+                        </Text>
+                        <Text style={[styles.label, { marginTop: spacing.sm }]}>Valor que va al crédito</Text>
+                        <TextInput style={styles.input} value={valorCredito} onChangeText={setValorCredito} keyboardType="numeric" placeholder="Valor para la cuota" placeholderTextColor={colors.textMuted} />
+                        {vm > vc && vc > 0 && <Text style={styles.previaTxt}>Quedan en el hogar {pesos(vm - vc)}</Text>}
+                        {vc > dd.restanteProxima && <Text style={styles.previaTxt}>Lo que pase de la cuota se aplica a la siguiente.</Text>}
+                      </View>
+                    );
+                  })()}
                 <TextInput style={styles.input} placeholder="Nota (opcional)" placeholderTextColor={colors.textMuted} value={nota} onChangeText={setNota} />
                 <PrimaryButton title="Guardar pago" onPress={guardarPago} loading={guardando} />
                 <TouchableOpacity onPress={() => setPagoDe(null)} style={{ marginTop: spacing.md, marginBottom: spacing.md }}>
@@ -518,6 +593,56 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
                 </TouchableOpacity>
               </>
             )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={!!yaPagadasDe} transparent animationType="slide">
+        <View style={styles.modalFondo}>
+          <ScrollView style={styles.modalCaja} keyboardShouldPersistTaps="handled">
+            {yaPagadasDe &&
+              (() => {
+                const marcar = yaPagadasDe.cuotas.filter((c) => c.estado === "pendiente" && c.fecha_vencimiento <= hastaPagadas);
+                const total = marcar.reduce((t, c) => t + c.cuota_total - c.valor_pagado, 0);
+                const hechas = yaPagadasDe.abonos.filter((a) => a.registro_inicial);
+                return (
+                  <>
+                    <Text style={typography.h2}>Cuotas ya pagadas</Text>
+                    <Text style={typography.caption}>
+                      {yaPagadasDe.quien_presta} → {yaPagadasDe.quien_recibe}. Marca las cuotas que ya te pagaron antes de usar la app. Quedan pagadas en la tabla (con sus intereses) pero no
+                      cuentan como ingreso de esos meses.
+                    </Text>
+                    <Text style={[styles.label, { marginTop: spacing.md }]}>Pagadas hasta</Text>
+                    <FechaInput value={hastaPagadas} onChange={setHastaPagadas} max={hoyISO()} />
+                    <View style={styles.previa}>
+                      <Text style={styles.previaTit}>
+                        {marcar.length ? `Se marcan ${marcar.length} cuota(s): #${marcar[0].numero_cuota} a #${marcar[marcar.length - 1].numero_cuota}` : "No hay cuotas pendientes hasta esa fecha"}
+                      </Text>
+                      {marcar.length > 0 && (
+                        <Text style={styles.previaTxt}>
+                          Total {pesos(total)} · intereses {pesos(marcar.reduce((t, c) => t + c.interes, 0))} · capital {pesos(marcar.reduce((t, c) => t + c.capital, 0))}
+                        </Text>
+                      )}
+                    </View>
+                    <PrimaryButton title="Marcar como pagadas" onPress={guardarYaPagadas} loading={guardando} />
+                    {hechas.length > 0 && (
+                      <TouchableOpacity
+                        style={{ marginTop: spacing.md }}
+                        onPress={() =>
+                          deshacerPagadas(yaPagadasDe)
+                            .then(() => setYaPagadasDe(null))
+                            .catch((e) => Alert.alert("Error", e.message))
+                        }
+                      >
+                        <Text style={{ textAlign: "center", color: colors.danger, fontWeight: "600" }}>Deshacer las {hechas.length} cuota(s) marcadas como ya pagadas</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => setYaPagadasDe(null)} style={{ marginTop: spacing.md, marginBottom: spacing.md }}>
+                      <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
+                    </TouchableOpacity>
+                  </>
+                );
+              })()}
           </ScrollView>
         </View>
       </Modal>

@@ -12,6 +12,8 @@ export interface AbonoRow {
   nota: string | null;
   destino_persona: string | null;
   deuda_id: string | null;
+  registro_inicial?: boolean; // ya estaba pagada antes de usar la app (no cuenta como ingreso)
+  valor_credito?: number | null; // parte del pago que fue a la cuota de un crédito
 }
 
 export interface CuotaPrestamo {
@@ -76,7 +78,10 @@ export interface DatosPrestamo {
   soloIntereses?: boolean;
 }
 
-export type DestinoAbono = { tipo: "hogar" } | { tipo: "persona"; persona: string } | { tipo: "credito"; deudaId: string };
+export type DestinoAbono =
+  | { tipo: "hogar" }
+  | { tipo: "persona"; persona: string }
+  | { tipo: "credito"; deudaId: string; valor?: number }; // valor = parte que va al crédito (el resto queda en el hogar)
 
 /** Cada mes se pagan solo los intereses; en la última cuota se devuelve todo el capital. */
 export function cuotasSoloIntereses(monto: number, iMensual: number, fechaPrimerPago: string, plazo: number): FilaCuota[] {
@@ -276,6 +281,7 @@ export function usePrestamos() {
         nota: nota ?? null,
         destino_persona: destino.tipo === "persona" ? destino.persona : null,
         deuda_id: destino.tipo === "credito" ? destino.deudaId : null,
+        ...(destino.tipo === "credito" ? { valor_credito: Math.round(Math.min(destino.valor ?? monto, monto)) } : {}),
       })
       .select()
       .single();
@@ -284,7 +290,7 @@ export function usePrestamos() {
       try {
         await registrarPagoDeuda({
           deudaId: destino.deudaId,
-          valor: monto,
+          valor: Math.min(destino.valor ?? monto, monto),
           fecha,
           origen: "prestamo",
           pagadoPor: `Préstamo ${prestamo?.quien_recibe ?? ""}`.trim(),
@@ -305,10 +311,50 @@ export function usePrestamos() {
     await cargar();
   }
 
+  /**
+   * Cuotas que ya estaban pagadas antes de usar la app (ej. hasta septiembre de 2026):
+   * quedan pagadas en la tabla pero no cuentan como ingreso del hogar en esos meses.
+   */
+  async function marcarPagadasHasta(p: PrestamoConAbonos, hasta: string) {
+    const cuotas = p.cuotas.filter((c) => c.estado === "pendiente" && c.fecha_vencimiento <= hasta);
+    if (!cuotas.length) return 0;
+    const { error: err } = await supabase.from("abonos_prestamo").insert(
+      cuotas.map((c) => ({
+        prestamo_id: p.id,
+        monto: Math.round(c.cuota_total - c.valor_pagado),
+        fecha: c.fecha_vencimiento,
+        nota: `Cuota #${c.numero_cuota} pagada antes de usar la app`,
+        registro_inicial: true,
+      }))
+    );
+    if (err) throw new Error(err.message.includes("registro_inicial") ? "Falta correr el archivo sql/10 en Supabase." : err.message);
+    await cargar();
+    return cuotas.length;
+  }
+
+  async function deshacerPagadas(p: PrestamoConAbonos) {
+    const { error: err } = await supabase.from("abonos_prestamo").delete().eq("prestamo_id", p.id).eq("registro_inicial", true);
+    if (err) throw err;
+    await cargar();
+  }
+
   /** Compatibilidad con la versión anterior. */
   async function agregarAbono(prestamoId: string, monto: number, nota?: string) {
     await registrarAbono(prestamoId, monto, hoyISO(), { tipo: "hogar" }, nota);
   }
 
-  return { prestamos, cargando, error, crearPrestamo, editarPrestamo, eliminarPrestamo, registrarAbono, eliminarAbono, agregarAbono, recargar: cargar };
+  return {
+    prestamos,
+    cargando,
+    error,
+    crearPrestamo,
+    editarPrestamo,
+    eliminarPrestamo,
+    registrarAbono,
+    eliminarAbono,
+    agregarAbono,
+    marcarPagadasHasta,
+    deshacerPagadas,
+    recargar: cargar,
+  };
 }

@@ -85,7 +85,7 @@ export function useDashboard(mes: string) {
       personasDelHogar(),
       supabase.from("aportes_mes").select("mes, usuario_nombre, aporte").gte("mes", meses[0]).lte("mes", mes),
       supabase.from("prestamos_personales").select("*"),
-      supabase.from("abonos_prestamo").select("prestamo_id, monto, fecha").gte("fecha", desde).lt("fecha", hasta),
+      supabase.from("abonos_prestamo").select("*").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("movimientos_inversion").select("tipo, monto, fecha").gte("fecha", desde).lt("fecha", hasta),
     ]);
     const rDes = await supabase.from("desembolsos_deuda").select("deuda_id, valor, fecha");
@@ -159,7 +159,7 @@ export function useDashboard(mes: string) {
     (rAbP.error ? [] : rAbP.data ?? []).forEach((a: any) => {
       const p = prestamos.get(a.prestamo_id);
       const b = porMes.get(mesDe(a.fecha));
-      if (!p || !b) return;
+      if (!p || !b || a.registro_inicial) return; // pagado antes de usar la app: no es ingreso de ese mes
       const d = direccion(p);
       // préstamos que son inversión: lo que pagan cuenta como ingreso de inversiones
       if (d === "prestamos" && p.es_inversion) b.inversiones += Number(a.monto);

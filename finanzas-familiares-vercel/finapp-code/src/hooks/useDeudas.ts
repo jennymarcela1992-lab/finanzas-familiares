@@ -62,6 +62,7 @@ export interface DeudaRow {
   pago_automatico_por: string | null; // débito automático desde la cuenta de esta persona
   propiedad_id: string | null; // crédito asociado a una propiedad
   vehiculo_id: string | null; // crédito asociado al carro
+  cuota_fija: number | null; // cuota fija (capital + interés, sin seguro) que se paga; el plazo sale de ella
   abono_mensual: number | null; // abono fijo extra a capital cada mes
   abono_mensual_desde: string | null;
 }
@@ -102,6 +103,7 @@ export interface DatosDeuda {
   frecuencia?: Frecuencia;
   pagoAutomaticoPor?: string | null;
   vinculos?: { tipo: "propiedad" | "vehiculo"; activoId: string; porcentaje: number }[];
+  cuotaFija?: number | null; // si viene, el plazo se calcula con esta cuota (capital + interés, sin seguro)
 }
 
 async function nombreUsuario(): Promise<string> {
@@ -243,6 +245,10 @@ export function useDeudas() {
     ];
 
     const cuotaActual = pendientes[0] ? Number(pendientes[0].capital) + Number(pendientes[0].interes) : null;
+    // Cuota fija definida por el usuario: se respeta, salvo que un abono/aumento pida recalcular la cuota (entonces se suelta)
+    const fija = Number(d.cuota_fija) > 0 ? Number(d.cuota_fija) : null;
+    const usarFija = !!fija && opciones.mantenerCuota === undefined;
+    if (fija && opciones.mantenerCuota === false) await supabase.from("deudas").update({ cuota_fija: null }).eq("id", deudaId);
     const { filas: nuevas, cuotasPlanInicial } = proyectarCuotas({
       saldoInicio,
       iMensual: i,
@@ -250,7 +256,7 @@ export function useDeudas() {
       fechaPrimerPago: primerPago,
       diaPago: d.dia_pago,
       numeroInicial,
-      cuotaInicio: opciones.mantenerCuota ? cuotaActual : null,
+      cuotaInicio: usarFija ? fija : opciones.mantenerCuota ? cuotaActual : null,
       cuotasRestantes: Math.max(1, Number(d.plazo_meses) - pagadas.length),
       eventos,
       abonoPeriodos: periodosDe(d, rM.error ? [] : rM.data ?? []),
@@ -286,6 +292,7 @@ export function useDeudas() {
       alias_pago: datos.aliasPago ?? null,
       frecuencia: datos.frecuencia ?? "mensual",
       pago_automatico_por: datos.pagoAutomaticoPor || null,
+      ...(datos.cuotaFija !== undefined ? { cuota_fija: datos.cuotaFija && datos.cuotaFija > 0 ? Math.round(datos.cuotaFija) : null } : {}),
       propiedad_id: datos.vinculos ? datos.vinculos.find((v) => v.tipo === "propiedad")?.activoId ?? null : datos.propiedadId ?? null,
       vehiculo_id: datos.vinculos ? datos.vinculos.find((v) => v.tipo === "vehiculo")?.activoId ?? null : datos.vehiculoId ?? null,
     };
@@ -309,8 +316,9 @@ export function useDeudas() {
       seguroMensual: datos.seguroMensual,
       fechaPrimerPago: datos.fechaPrimerPago,
       numeroInicial: 1,
-      cuotasRestantes: datos.plazoMeses,
+      ...(datos.cuotaFija && datos.cuotaFija > 0 ? { cuotaObjetivo: datos.cuotaFija } : { cuotasRestantes: datos.plazoMeses }),
     });
+    if (datos.cuotaFija && datos.cuotaFija > 0) await supabase.from("deudas").update({ plazo_meses: cuotas.length }).eq("id", creada.id);
     const { error: errCuotas } = await supabase
       .from("cuotas_deuda")
       .insert(cuotas.map((c) => ({ ...c, deuda_id: creada.id, estado: "pendiente", valor_pagado: 0 })));

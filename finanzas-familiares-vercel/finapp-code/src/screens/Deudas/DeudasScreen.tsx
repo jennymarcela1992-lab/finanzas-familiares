@@ -24,6 +24,7 @@ import {
   formatoFecha,
   pesos,
   Frecuencia,
+  tasaPeriodo,
 } from "../../utils/amortizacion";
 
 const FORM_VACIO = {
@@ -32,6 +33,8 @@ const FORM_VACIO = {
   tasa: "",
   tipoTasa: "EA" as TipoTasa,
   plazo: "",
+  modoCalculo: "plazo" as "plazo" | "cuota", // calcular por número de cuotas o por una cuota fija
+  cuotaFija: "",
   seguro: "",
   fechaPrimerPago: sumarMeses(hoyISO(), 1),
   entidad: "",
@@ -96,6 +99,45 @@ export default function DeudasScreen() {
     return vistaPrevia(valor, tasa, form.tipoTasa, plazo, seguro, form.frecuencia);
   }, [form.valor, form.tasa, form.plazo, form.seguro, form.tipoTasa, form.frecuencia]);
 
+  // Con cuota fija: cuántas cuotas salen y cuánto de cada una es interés y cuánto capital
+  const deudaEditando = editandoId ? deudas.find((d) => d.id === editandoId) ?? null : null;
+  const previaFija = useMemo(() => {
+    if (form.modoCalculo !== "cuota") return null;
+    const cuota = aNumero(form.cuotaFija);
+    const tasa = aNumero(form.tasa);
+    const valor = aNumero(form.valor);
+    if (!(cuota > 0) || !(tasa >= 0) || !(valor > 0) || !esFechaValida(form.fechaPrimerPago)) return null;
+    const i = tasaPeriodo(tasa, form.tipoTasa, form.frecuencia);
+    // al editar un crédito que ya tiene pagos, se calcula sobre el saldo actual y desde la próxima cuota
+    const base = deudaEditando && deudaEditando.proximaCuota ? deudaEditando.saldoActual : valor;
+    const desde = deudaEditando && deudaEditando.proximaCuota ? deudaEditando.proximaCuota.numero_cuota : 1;
+    try {
+      const filas = generarCuotas({
+        saldo: base,
+        iMensual: i,
+        seguroMensual: aNumero(form.seguro) || 0,
+        fechaPrimerPago: form.fechaPrimerPago,
+        numeroInicial: desde,
+        cuotaObjetivo: cuota,
+        frecuencia: form.frecuencia,
+        abonoPeriodos: deudaEditando?.abonosPeriodos, // el abono fijo mensual también acorta el plazo
+      });
+      if (!filas.length) return null;
+      return {
+        i,
+        saldo: base,
+        filas,
+        n: filas.length,
+        plazoTotal: desde - 1 + filas.length,
+        intereses: filas.reduce((t, f) => t + f.interes, 0),
+        ultima: filas[filas.length - 1],
+        error: null as string | null,
+      };
+    } catch (e: any) {
+      return { error: `La cuota no alcanza ni para los intereses (el primer mes son ${pesos(Math.round(base * i))}).` } as any;
+    }
+  }, [form.modoCalculo, form.cuotaFija, form.tasa, form.valor, form.seguro, form.tipoTasa, form.frecuencia, form.fechaPrimerPago, deudaEditando]);
+
   const fechaOk = esFechaValida(form.fechaPrimerPago);
   const fechaEnPasado = fechaOk && form.fechaPrimerPago < hoyISO();
 
@@ -117,6 +159,8 @@ export default function DeudasScreen() {
       tasa: String(d.tasa_interes).replace(".", ","),
       tipoTasa: d.tipo_tasa ?? "MV",
       plazo: String(d.plazo_meses),
+      modoCalculo: Number(d.cuota_fija) > 0 ? "cuota" : "plazo",
+      cuotaFija: Number(d.cuota_fija) > 0 ? Math.round(Number(d.cuota_fija)).toLocaleString("es-CO") : "",
       seguro: d.seguro_mensual ? Math.round(Number(d.seguro_mensual)).toLocaleString("es-CO") : "",
       fechaPrimerPago: d.primerPago,
       entidad: d.entidad_pago ?? "",
@@ -133,7 +177,12 @@ export default function DeudasScreen() {
   async function guardar() {
     const valor = aNumero(form.valor);
     const tasa = aNumero(form.tasa);
-    const plazo = Math.round(aNumero(form.plazo));
+    const porCuota = form.modoCalculo === "cuota";
+    if (porCuota && (!previaFija || previaFija.error)) {
+      Alert.alert("Cuota fija", previaFija?.error ?? "Escribe la cuota fija (capital + interés) con un número válido.");
+      return;
+    }
+    const plazo = porCuota ? previaFija.plazoTotal : Math.round(aNumero(form.plazo));
     if (!form.nombre.trim() || !(valor > 0) || !(tasa >= 0) || !(plazo > 0)) {
       Alert.alert("Faltan datos", "Completa nombre, valor, tasa y plazo con números válidos.");
       return;
@@ -164,6 +213,8 @@ export default function DeudasScreen() {
         .map((x) => ({ tipo: x.a!.tipo, activoId: x.a!.id, porcentaje: x.pct })),
       frecuencia: form.frecuencia,
       pagoAutomaticoPor: form.automatico || null,
+      // se envía null para quitar una cuota fija que ya existía; undefined si nunca la tuvo
+      cuotaFija: porCuota ? aNumero(form.cuotaFija) : Number(deudaEditando?.cuota_fija) > 0 ? null : undefined,
     };
     setGuardando(true);
     try {
@@ -267,8 +318,31 @@ export default function DeudasScreen() {
             <Text style={styles.ayuda}>Dos cuotas al mes (ej. 15 y 30). La tasa se convierte a su equivalente quincenal.</Text>
           )}
 
-          <Text style={styles.label}>Plazo total (número de cuotas{form.frecuencia === "quincenal" ? ", quincenas" : ""})</Text>
-          <TextInput style={styles.input} placeholder="Ej. 60" placeholderTextColor={colors.textMuted} value={form.plazo} onChangeText={cambiar("plazo")} keyboardType="numeric" />
+          <Text style={styles.label}>¿Cómo se calcula?</Text>
+          <View style={styles.chips}>
+            {(
+              [
+                ["plazo", "Por número de cuotas"],
+                ["cuota", "Por cuota fija"],
+              ] as const
+            ).map(([k, t]) => (
+              <TouchableOpacity key={k} onPress={() => setForm((f) => ({ ...f, modoCalculo: k }))} style={[styles.chip, form.modoCalculo === k && styles.chipActivo]}>
+                <Text style={[styles.chipTexto, form.modoCalculo === k && styles.chipTextoActivo]}>{t}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {form.modoCalculo === "plazo" ? (
+            <>
+              <Text style={styles.label}>Plazo total (número de cuotas{form.frecuencia === "quincenal" ? ", quincenas" : ""})</Text>
+              <TextInput style={styles.input} placeholder="Ej. 60" placeholderTextColor={colors.textMuted} value={form.plazo} onChangeText={cambiar("plazo")} keyboardType="numeric" />
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Cuota fija que se paga (capital + interés, sin seguros)</Text>
+              <TextInput style={styles.input} placeholder="Ej. 2.500.000" placeholderTextColor={colors.textMuted} value={form.cuotaFija} onChangeText={cambiar("cuotaFija")} keyboardType="numeric" />
+              <Text style={styles.ayuda}>Con esta cuota se calcula cada mes cuánto es interés, cuánto va a capital y en cuántas cuotas se termina.</Text>
+            </>
+          )}
 
           <Text style={styles.label}>Seguros y otros cobros fijos por mes (opcional)</Text>
           <TextInput style={styles.input} placeholder="Ej. 85.000" placeholderTextColor={colors.textMuted} value={form.seguro} onChangeText={cambiar("seguro")} keyboardType="numeric" />
@@ -284,7 +358,34 @@ export default function DeudasScreen() {
             </View>
           )}
 
-          {previa && (
+          {form.modoCalculo === "cuota" && previaFija?.error && <Text style={[styles.ayuda, { color: colors.danger }]}>{previaFija.error}</Text>}
+          {form.modoCalculo === "cuota" && previaFija && !previaFija.error && (
+            <View style={styles.previa}>
+              <Text style={styles.previaTitulo}>
+                Se paga en {previaFija.n} cuotas{deudaEditando?.proximaCuota ? " más" : ""} · termina el {formatoFecha(previaFija.ultima.fecha_vencimiento)}
+              </Text>
+              <Text style={styles.previaTexto}>
+                Saldo {pesos(previaFija.saldo)} · tasa {form.frecuencia === "quincenal" ? "quincenal" : "mensual"} {(previaFija.i * 100).toLocaleString("es-CO", { maximumFractionDigits: 4 })}% · intereses
+                totales {pesos(previaFija.intereses)}
+              </Text>
+              <View style={[styles.rowStart, { marginTop: 6 }]}>
+                <Text style={[styles.previaTexto, { flex: 0.6, fontWeight: "700" }]}>Cuota</Text>
+                <Text style={[styles.previaTexto, { flex: 1, fontWeight: "700", textAlign: "right" }]}>Interés</Text>
+                <Text style={[styles.previaTexto, { flex: 1, fontWeight: "700", textAlign: "right" }]}>A capital</Text>
+                <Text style={[styles.previaTexto, { flex: 1.2, fontWeight: "700", textAlign: "right" }]}>Saldo</Text>
+              </View>
+              {[...previaFija.filas.slice(0, 3), ...(previaFija.n > 3 ? [previaFija.ultima] : [])].map((f: any) => (
+                <View key={f.numero_cuota} style={styles.rowStart}>
+                  <Text style={[styles.previaTexto, { flex: 0.6 }]}>#{f.numero_cuota}</Text>
+                  <Text style={[styles.previaTexto, { flex: 1, textAlign: "right" }]}>{pesos(f.interes)}</Text>
+                  <Text style={[styles.previaTexto, { flex: 1, textAlign: "right" }]}>{pesos(f.capital)}</Text>
+                  <Text style={[styles.previaTexto, { flex: 1.2, textAlign: "right" }]}>{pesos(f.saldo)}</Text>
+                </View>
+              ))}
+              <Text style={styles.ayuda}>Cada mes el interés baja y va más a capital. La última cuota es menor porque cierra el saldo exacto.</Text>
+            </View>
+          )}
+          {form.modoCalculo === "plazo" && previa && (
             <View style={styles.previa}>
               <Text style={styles.previaTitulo}>Cuota {form.frecuencia} calculada: {pesos(previa.cuotaConSeguro)}</Text>
               <Text style={styles.previaTexto}>
@@ -422,6 +523,7 @@ export default function DeudasScreen() {
                   {!!d.pago_automatico_por && (
                     <Text style={[styles.badge, styles.badgeAuto]}>Débito automático desde {d.pago_automatico_por}</Text>
                   )}
+                  {Number(d.cuota_fija) > 0 && <Text style={styles.badge}>Cuota fija {pesos(Number(d.cuota_fija))}</Text>}
                 </View>
               </View>
             </View>
@@ -446,6 +548,7 @@ export default function DeudasScreen() {
                 {d.entidad_pago ? ` · ${d.entidad_pago}` : ""}
                 {d.numero_cuenta ? ` (${d.numero_cuenta})` : ""}
                 {d.alias_pago ? ` · ${d.alias_pago}` : ""}
+                {`\nDe esa cuota: interés ${pesos(Number(d.proximaCuota.interes))} · a capital ${pesos(Number(d.proximaCuota.capital) + Number(d.proximaCuota.abono_extra ?? 0))}${Number(d.proximaCuota.seguro) ? ` · seguros ${pesos(Number(d.proximaCuota.seguro))}` : ""}`}
               </Text>
             </View>
           )}
