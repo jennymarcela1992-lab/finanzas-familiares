@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { asegurarAutomaticos } from "../utils/automaticos";
 import { hoyISO, sumarMeses } from "../utils/amortizacion";
 import { personasDelHogar, aportesDelMes, esDelHogar, AportePersona } from "../utils/aportes";
 import { arriendoVigente, fechaPagoArriendo } from "../utils/arriendo";
@@ -70,6 +71,7 @@ export function useDashboard(mes: string) {
 
   const cargar = useCallback(async () => {
     setCargando(true);
+    await asegurarAutomaticos(); // anota débitos automáticos y gastos recurrentes que ya vencieron
     const meses = Array.from({ length: 6 }, (_, i) => moverMes(mes, i - 5));
     const desde = `${meses[0]}-01`;
     const hasta = finDeMes(mes); // exclusivo

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
-import { TipoTasa, tasaMensual, generarCuotas, sumarMeses, hoyISO, fechaCuota, proyectarCuotas, EventoCredito } from "../utils/amortizacion";
+import { TipoTasa, Frecuencia, PeriodoAbono, tasaPeriodo, abonoVigenteEn, generarCuotas, sumarMeses, hoyISO, fechaCuota, proyectarCuotas, EventoCredito } from "../utils/amortizacion";
+import { asegurarAutomaticos } from "../utils/automaticos";
 import { PagoDeudaRow, reaplicarPagos, registrarPagoDeuda, restanteDeCuota, nombreUsuarioActual } from "../utils/pagosDeuda";
 
 export interface CuotaRow {
@@ -56,6 +57,8 @@ export interface DeudaRow {
   numero_cuenta: string | null;
   alias_pago: string | null;
   dias_aviso_previo: number;
+  frecuencia: Frecuencia | null; // mensual o quincenal
+  pago_automatico_por: string | null; // débito automático desde la cuenta de esta persona
   propiedad_id: string | null; // crédito asociado a una propiedad
   vehiculo_id: string | null; // crédito asociado al carro
   abono_mensual: number | null; // abono fijo extra a capital cada mes
@@ -66,6 +69,8 @@ export interface DeudaConCuotas extends DeudaRow {
   cuotas: CuotaRow[];
   abonos: AbonoRow[];
   desembolsos: DesembolsoRow[];
+  abonosPeriodos: (PeriodoAbono & { id?: string })[]; // historial del abono fijo (valor desde cada fecha)
+  abonoVigente: number; // abono fijo que aplica a la próxima cuota
   montoTotal: number; // valor inicial + aumentos del préstamo
   pagos: PagoDeudaRow[];
   restanteProxima: number; // lo que falta por pagar de la próxima cuota
@@ -74,7 +79,7 @@ export interface DeudaConCuotas extends DeudaRow {
   proximaCuota: CuotaRow | null;
   saldoActual: number;
   interesesPendientes: number;
-  iMensual: number;
+  iMensual: number; // tasa por periodo de pago (mensual o quincenal)
   primerPago: string;
 }
 
@@ -92,11 +97,21 @@ export interface DatosDeuda {
   diasAvisoPrevio?: number;
   propiedadId?: string | null;
   vehiculoId?: string | null;
+  frecuencia?: Frecuencia;
+  pagoAutomaticoPor?: string | null;
 }
 
 async function nombreUsuario(): Promise<string> {
   const { data } = await supabase.auth.getUser();
   return data.user?.user_metadata?.nombre ?? data.user?.email ?? "Alguien";
+}
+
+/** Periodos del abono fijo; los créditos viejos guardaban un solo valor en la deuda. */
+function periodosDe(d: DeudaRow, filas: any[]): (PeriodoAbono & { id?: string })[] {
+  const propios = filas.filter((p) => p.deuda_id === d.id).map((p) => ({ id: p.id, desde: String(p.desde), valor: Number(p.valor) }));
+  if (propios.length) return propios.sort((a, b) => a.desde.localeCompare(b.desde));
+  if (Number(d.abono_mensual ?? 0) > 0) return [{ desde: d.abono_mensual_desde ?? "0000-01-01", valor: Number(d.abono_mensual) }];
+  return [];
 }
 
 function primerPagoDe(d: DeudaRow): string {
@@ -124,12 +139,14 @@ export function useDeudas() {
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const [rD, rC, rA, rP, rX] = await Promise.all([
+    await asegurarAutomaticos(); // registra débitos automáticos y gastos recurrentes que ya vencieron
+    const [rD, rC, rA, rP, rX, rM] = await Promise.all([
       supabase.from("deudas").select("*").order("creado_en", { ascending: false }),
       supabase.from("cuotas_deuda").select("*").order("numero_cuota", { ascending: true }),
       supabase.from("abonos_deuda").select("*").order("fecha", { ascending: true }),
       supabase.from("pagos_deuda").select("*").order("fecha", { ascending: false }),
       supabase.from("desembolsos_deuda").select("*").order("fecha", { ascending: true }),
+      supabase.from("abonos_mensuales_deuda").select("*"),
     ]);
     const err = rD.error ?? rC.error;
     if (err) {
@@ -141,6 +158,7 @@ export function useDeudas() {
     const abonosData = (rA.error ? [] : rA.data ?? []) as AbonoRow[];
     const pagosData = (rP.error ? [] : rP.data ?? []) as PagoDeudaRow[];
     const desembolsosData = (rX.error ? [] : rX.data ?? []) as DesembolsoRow[];
+    const periodosData = (rM.error ? [] : rM.data ?? []) as any[];
 
     const combinadas: DeudaConCuotas[] = (rD.data ?? []).map((d: DeudaRow) => {
       const cuotas = (rC.data ?? []).filter((c: CuotaRow) => c.deuda_id === d.id) as CuotaRow[];
@@ -155,6 +173,8 @@ export function useDeudas() {
         cuotas,
         abonos,
         desembolsos,
+        abonosPeriodos: periodosDe(d, periodosData),
+        abonoVigente: abonoVigenteEn(periodosDe(d, periodosData), pendientes[0]?.fecha_vencimiento ?? hoyISO()),
         montoTotal,
         pagos: pagosData.filter((p) => p.deuda_id === d.id),
         restanteProxima: restanteDeCuota(pendientes[0]),
@@ -163,7 +183,7 @@ export function useDeudas() {
         proximaCuota: pendientes[0] ?? null,
         saldoActual,
         interesesPendientes: pendientes.reduce((s, c) => s + Number(c.interes), 0),
-        iMensual: tasaMensual(Number(d.tasa_interes), d.tipo_tasa ?? "MV"),
+        iMensual: tasaPeriodo(Number(d.tasa_interes), d.tipo_tasa ?? "MV", d.frecuencia ?? "mensual"),
         primerPago: primerPagoDe(d),
       };
     });
@@ -185,6 +205,7 @@ export function useDeudas() {
       supabase.from("abonos_deuda").select("*").eq("deuda_id", deudaId),
       supabase.from("desembolsos_deuda").select("*").eq("deuda_id", deudaId),
     ]);
+    const rM = await supabase.from("abonos_mensuales_deuda").select("*").eq("deuda_id", deudaId);
     chequear(rD.error, "No se pudo leer la deuda");
     chequear(rC.error, "No se pudieron leer las cuotas");
     chequear(rA.error, "No se pudieron leer los abonos");
@@ -196,12 +217,13 @@ export function useDeudas() {
     const pagadas = cuotas.filter((c) => c.estado === "pagada");
     const pendientes = cuotas.filter((c) => c.estado === "pendiente");
     const numeroInicial = pagadas.length ? Math.max(...pagadas.map((c) => c.numero_cuota)) + 1 : 1;
-    const i = tasaMensual(Number(d.tasa_interes), d.tipo_tasa ?? "MV");
+    const frecuencia = d.frecuencia ?? "mensual";
+    const i = tasaPeriodo(Number(d.tasa_interes), d.tipo_tasa ?? "MV", frecuencia);
     const primerPago = primerPagoDe(d);
 
     // Los aumentos/abonos con fecha hasta la próxima cuota ya cuentan en el saldo de arranque;
     // los que tienen fecha posterior se aplican en el mes que corresponde (créditos con historial).
-    const corte = fechaCuota(primerPago, numeroInicial, d.dia_pago);
+    const corte = fechaCuota(primerPago, numeroInicial, d.dia_pago, frecuencia);
     const capitalPagado = pagadas.reduce((s, c) => s + Number(c.capital) + Number(c.abono_extra ?? 0), 0);
     const abonosAntes = abonos.filter((a) => a.fecha <= corte).reduce((s, a) => s + Number(a.valor), 0);
     const aumentosAntes = desembolsos.filter((x) => x.fecha <= corte).reduce((s, x) => s + Number(x.valor), 0);
@@ -226,8 +248,8 @@ export function useDeudas() {
       cuotaInicio: opciones.mantenerCuota ? cuotaActual : null,
       cuotasRestantes: Math.max(1, Number(d.plazo_meses) - pagadas.length),
       eventos,
-      abonoMensual: Number(d.abono_mensual ?? 0),
-      abonoDesde: d.abono_mensual_desde,
+      abonoPeriodos: periodosDe(d, rM.error ? [] : rM.data ?? []),
+      frecuencia,
     });
 
     const { error: errBorrar } = await supabase.from("cuotas_deuda").delete().eq("deuda_id", deudaId).eq("estado", "pendiente");
@@ -257,6 +279,8 @@ export function useDeudas() {
       entidad_pago: datos.entidadPago ?? null,
       numero_cuenta: datos.numeroCuenta ?? null,
       alias_pago: datos.aliasPago ?? null,
+      frecuencia: datos.frecuencia ?? "mensual",
+      pago_automatico_por: datos.pagoAutomaticoPor || null,
       propiedad_id: datos.propiedadId ?? null,
       vehiculo_id: datos.vehiculoId ?? null,
     };
@@ -274,7 +298,8 @@ export function useDeudas() {
     const hoy = hoyISO();
     const cuotas = generarCuotas({
       saldo: datos.valorInicial,
-      iMensual: tasaMensual(datos.tasa, datos.tipoTasa),
+      iMensual: tasaPeriodo(datos.tasa, datos.tipoTasa, datos.frecuencia ?? "mensual"),
+      frecuencia: datos.frecuencia ?? "mensual",
       seguroMensual: datos.seguroMensual,
       fechaPrimerPago: datos.fechaPrimerPago,
       numeroInicial: 1,
@@ -450,15 +475,38 @@ export function useDeudas() {
     await cargar();
   }
 
-  /** Abono fijo extra a capital en cada cuota desde `desde`. Valor 0 lo quita. La cuota base no cambia; se acorta el plazo. */
+  /**
+   * Abono fijo extra a capital en cada cuota, desde `desde`. Cada cambio (subirlo, bajarlo o dejarlo en 0)
+   * queda en el historial: las cuotas anteriores conservan el valor que tenían. La cuota base no cambia; se acorta el plazo.
+   */
   async function definirAbonoMensual(deudaId: string, valor: number, desde: string | null) {
-    const { error: err } = await supabase
-      .from("deudas")
-      .update({ abono_mensual: valor > 0 ? Math.round(valor) : 0, abono_mensual_desde: valor > 0 ? desde : null })
-      .eq("id", deudaId);
+    const fecha = desde ?? hoyISO();
+    const { error: err } = await supabase.from("abonos_mensuales_deuda").insert({ deuda_id: deudaId, desde: fecha, valor: Math.max(0, Math.round(valor)) });
     chequear(err, "No se pudo guardar el abono mensual");
+    // compatibilidad: la deuda guarda el último valor
+    await supabase.from("deudas").update({ abono_mensual: Math.max(0, Math.round(valor)), abono_mensual_desde: valor > 0 ? fecha : null }).eq("id", deudaId);
     await recalcularPendientes(deudaId, { mantenerCuota: true });
     await cargar();
+  }
+
+  /** Borra un cambio del abono fijo registrado por error. */
+  async function eliminarPeriodoAbono(deudaId: string, periodoId: string) {
+    const { error: err } = await supabase.from("abonos_mensuales_deuda").delete().eq("id", periodoId);
+    chequear(err, "No se pudo borrar");
+    await recalcularPendientes(deudaId, { mantenerCuota: true });
+    await cargar();
+  }
+
+  /** Quita la marca de "pagada" de una cuota borrando el pago que la cubrió. */
+  async function desmarcarCuota(deudaId: string, cuota: CuotaRow) {
+    const deuda = deudas.find((d) => d.id === deudaId);
+    const pagos = deuda?.pagos ?? [];
+    const pago =
+      pagos.find((p) => p.origen === "registro_inicial" && p.fecha === cuota.fecha_vencimiento) ??
+      pagos.find((p) => p.fecha === cuota.fecha_pago && (p.pagado_por ?? null) === (cuota.pagada_por ?? null)) ??
+      pagos.find((p) => p.fecha === cuota.fecha_pago);
+    if (!pago) throw new Error("No encontré el pago de esta cuota. Revisa la lista de Pagos registrados.");
+    await eliminarPago(pago);
   }
 
   /** Borra un abono registrado por error y deshace su efecto en las cuotas. */
@@ -485,6 +533,8 @@ export function useDeudas() {
     marcarPagadasHasta,
     deshacerYaPagadas,
     definirAbonoMensual,
+    eliminarPeriodoAbono,
+    desmarcarCuota,
     recargar: cargar,
   };
 }

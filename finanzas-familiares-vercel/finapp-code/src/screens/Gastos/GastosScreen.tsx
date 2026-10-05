@@ -8,7 +8,9 @@ import { useGastos, GastoRow } from "../../hooks/useGastos";
 import { useTasasCambio } from "../../hooks/useTasasCambio";
 import { useDeudas } from "../../hooks/useDeudas";
 import { useActivos, Activo } from "../../hooks/useActivos";
-import { formatoFecha, pesos, hoyISO } from "../../utils/amortizacion";
+import { formatoFecha, pesos, hoyISO, sumarMeses } from "../../utils/amortizacion";
+import { useGastosRecurrentes } from "../../hooks/useGastosRecurrentes";
+import { usePersonas } from "../../hooks/usePersonas";
 import FechaInput from "../../components/FechaInput";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
@@ -30,7 +32,14 @@ const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function GastosScreen() {
-  const { gastos, papelera, cargando, error, agregarGasto, editarGasto, moverAPapelera, restaurarGasto, borrarGasto, generarCSV } = useGastos();
+  const { gastos, papelera, cargando, error, agregarGasto, editarGasto, moverAPapelera, restaurarGasto, borrarGasto, generarCSV, recargar } = useGastos();
+  const { recurrentes, crearRecurrente, actualizarRecurrente, eliminarRecurrente } = useGastosRecurrentes();
+  const { personas, yo } = usePersonas();
+  const [esAutomatico, setEsAutomatico] = useState(false);
+  const [pagaAuto, setPagaAuto] = useState("");
+  const [hastaModo, setHastaModo] = useState<"sin" | "3" | "6" | "12" | "fecha">("sin");
+  const [hastaFecha, setHastaFecha] = useState(sumarMeses(hoyISO(), 12));
+  const [verAutomaticos, setVerAutomaticos] = useState(false);
   const { tasas, convertirACOP } = useTasasCambio();
   const { deudas, recargar: recargarDeudas } = useDeudas();
   const { activos } = useActivos();
@@ -81,6 +90,9 @@ export default function GastosScreen() {
     setDeudaElegida(null);
     setEditando(null);
     setAsociado(null);
+    setEsAutomatico(false);
+    setPagaAuto("");
+    setHastaModo("sin");
   }
 
   function abrirNuevo() {
@@ -158,7 +170,25 @@ export default function GastosScreen() {
         propiedadId: asociado?.tipo === "propiedad" ? asociado.id : null,
         vehiculoId: asociado?.tipo === "vehiculo" ? asociado.id : null,
       };
-      if (editando) {
+      if (!editando && esAutomatico) {
+        const hasta =
+          hastaModo === "sin" ? null : hastaModo === "fecha" ? hastaFecha : sumarMeses(fecha, Number(hastaModo) - 1);
+        await crearRecurrente({
+          item: datos.item,
+          valor: datos.valorCop ?? datos.valor,
+          rubro: datos.rubro,
+          pagadoPor: pagaAuto || yo,
+          esCompartido: datos.esCompartido,
+          dia: Number(fecha.slice(8, 10)),
+          desde: fecha,
+          hasta,
+          propiedadId: datos.propiedadId,
+          vehiculoId: datos.vehiculoId,
+          nota: datos.nota,
+        });
+        await recargar();
+        setEsAutomatico(false);
+      } else if (editando) {
         await editarGasto(editando.id, { ...datos, quitarFoto: !fotoActual && !comprobanteUri && !!editando.comprobante_url });
         if (editando.deuda_id) recargarDeudas();
       } else {
@@ -232,6 +262,9 @@ export default function GastosScreen() {
           <Ionicons name="search" size={15} color={colors.textMuted} />
           <TextInput style={styles.buscadorInput} placeholder="Buscar gasto o nota..." placeholderTextColor={colors.textMuted} value={busqueda} onChangeText={setBusqueda} />
         </View>
+        <TouchableOpacity style={[styles.papeleraBoton, verAutomaticos && styles.papeleraBotonActivo]} onPress={() => setVerAutomaticos(!verAutomaticos)}>
+          <Ionicons name="repeat" size={16} color={verAutomaticos ? colors.white : colors.textSecondary} />
+        </TouchableOpacity>
         <TouchableOpacity style={styles.papeleraBoton} onPress={descargarReporte}>
           <Ionicons name="download" size={16} color={colors.textSecondary} />
         </TouchableOpacity>
@@ -239,6 +272,60 @@ export default function GastosScreen() {
           <Ionicons name="trash" size={16} color={verPapelera ? colors.white : colors.textSecondary} />
         </TouchableOpacity>
       </View>
+
+      {verAutomaticos && (
+        <Card style={styles.formCard}>
+          <Text style={typography.h3}>Gastos automáticos ({recurrentes.length})</Text>
+          <Text style={styles.pista}>Se anotan solos cada mes, en su día, a nombre de quien los paga. Para crear uno, activa "Es automático" al registrar un gasto.</Text>
+          {recurrentes.length === 0 && <Text style={typography.caption}>Todavía no hay gastos automáticos.</Text>}
+          {recurrentes.map((r) => {
+            const terminado = !r.activo || (r.hasta !== null && r.hasta < hoyISO());
+            return (
+              <View key={r.id} style={styles.autoFila}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[typography.h3, terminado && { color: colors.textMuted }]}>
+                    {r.item} · {pesos(Number(r.valor))}
+                  </Text>
+                  <Text style={typography.caption}>
+                    Día {r.dia} de cada mes · paga {r.usuario_pago_nombre ?? "—"} · {r.hasta ? `hasta ${formatoFecha(r.hasta)}` : "sin fecha de fin"}
+                    {!r.activo ? " · detenido" : ""}
+                    {r.ultima_generada ? ` · último ${formatoFecha(r.ultima_generada)}` : ""}
+                  </Text>
+                </View>
+                <View style={{ gap: 6, alignItems: "flex-end" }}>
+                  {!terminado && (
+                    <TouchableOpacity
+                      onPress={() =>
+                        Alert.alert("Detener", `¿Dejar de anotar "${r.item}" desde hoy? Los gastos ya anotados se conservan.`, [
+                          { text: "Cancelar", style: "cancel" },
+                          { text: "Detener", style: "destructive", onPress: () => actualizarRecurrente(r.id, { activo: false }).catch((e) => Alert.alert("Error", e.message)) },
+                        ])
+                      }
+                    >
+                      <Text style={styles.autoAccion}>Detener</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!r.activo && (
+                    <TouchableOpacity onPress={() => actualizarRecurrente(r.id, { activo: true }).then(recargar).catch((e) => Alert.alert("Error", e.message))}>
+                      <Text style={styles.autoAccion}>Reactivar</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    onPress={() =>
+                      Alert.alert("Eliminar automático", `¿Eliminar "${r.item}"? Los gastos ya anotados se conservan.`, [
+                        { text: "Cancelar", style: "cancel" },
+                        { text: "Eliminar", style: "destructive", onPress: () => eliminarRecurrente(r.id).catch((e) => Alert.alert("Error", e.message)) },
+                      ])
+                    }
+                  >
+                    <Text style={[styles.autoAccion, { color: colors.danger }]}>Eliminar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+        </Card>
+      )}
 
       {!verPapelera && (
         <View style={styles.chipsRowFiltro}>
@@ -316,8 +403,48 @@ export default function GastosScreen() {
             <Text style={styles.conversionTexto}>≈ ${convertirACOP(aNumero(valor) || 0, moneda).toLocaleString("es-CO")} COP</Text>
           )}
 
-          <Text style={styles.label}>Fecha del gasto</Text>
-          <FechaInput value={fecha} onChange={setFecha} max={hoyISO()} />
+          <Text style={styles.label}>{esAutomatico ? "Primera fecha (se repite este día cada mes)" : "Fecha del gasto"}</Text>
+          <FechaInput value={fecha} onChange={setFecha} max={esAutomatico ? undefined : hoyISO()} />
+
+          {!editando && !esPagoCredito && (
+            <View style={styles.switchRow}>
+              <Text style={[typography.body, { flex: 1 }]}>Es automático (se anota solo cada mes)</Text>
+              <Switch value={esAutomatico} onValueChange={setEsAutomatico} trackColor={{ true: colors.primary }} />
+            </View>
+          )}
+          {!editando && esAutomatico && (
+            <View style={styles.creditoBox}>
+              <Text style={styles.label}>¿Quién lo paga?</Text>
+              <View style={styles.chipsRow}>
+                {personas.map((n) => (
+                  <TouchableOpacity key={n} style={[styles.chip, (pagaAuto || yo) === n && styles.chipActivo]} onPress={() => setPagaAuto(n)}>
+                    <Text style={[styles.chipText, (pagaAuto || yo) === n && styles.chipTextActivo]}>{n}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.label}>¿Por cuánto tiempo?</Text>
+              <View style={styles.chipsRow}>
+                {(
+                  [
+                    ["sin", "Sin fecha de fin"],
+                    ["3", "3 meses"],
+                    ["6", "6 meses"],
+                    ["12", "12 meses"],
+                    ["fecha", "Hasta una fecha"],
+                  ] as const
+                ).map(([k, t]) => (
+                  <TouchableOpacity key={k} style={[styles.chip, hastaModo === k && styles.chipActivo]} onPress={() => setHastaModo(k)}>
+                    <Text style={[styles.chipText, hastaModo === k && styles.chipTextActivo]}>{t}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {hastaModo === "fecha" && <FechaInput value={hastaFecha} onChange={setHastaFecha} min={fecha} />}
+              <Text style={styles.creditoInfo}>
+                Se anotará el día {Number(fecha.slice(8, 10))} de cada mes a nombre de {pagaAuto || yo}
+                {hastaModo === "sin" ? ", sin fecha de fin" : hastaModo === "fecha" ? ` hasta el ${formatoFecha(hastaFecha)}` : ` durante ${hastaModo} meses`}. Si la primera fecha ya pasó, se anotan también los meses atrasados.
+              </Text>
+            </View>
+          )}
 
           <Text style={styles.label}>Rubro</Text>
           <View style={styles.chipsRow}>
@@ -455,6 +582,7 @@ export default function GastosScreen() {
                       Pago de crédito{deudas.find((d) => d.id === g.deuda_id) ? `: ${deudas.find((d) => d.id === g.deuda_id)!.nombre}` : ""}
                     </Text>
                   )}
+                  {(g as any).recurrente_id && <Text style={styles.creditoBadge}>Automático</Text>}
                   {(g.propiedad_id || g.vehiculo_id) && (
                     <Text style={styles.creditoBadge}>
                       {g.propiedad_id ? "Propiedad" : "Carro"}: {activos.find((a) => a.id === (g.propiedad_id || g.vehiculo_id))?.nombre ?? ""}
@@ -508,6 +636,8 @@ const styles = StyleSheet.create({
   chipActivo: { backgroundColor: colors.primary },
   chipText: { color: colors.primary, fontSize: 12, fontWeight: "600" },
   chipTextActivo: { color: colors.white },
+  autoFila: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
+  autoAccion: { fontSize: 12, fontWeight: "700", color: colors.primary },
   pista: { fontSize: 11, color: colors.textMuted, marginBottom: spacing.sm },
   borrarEnlace: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.md },
   borrarTexto: { color: colors.danger, fontSize: 13, fontWeight: "600" },

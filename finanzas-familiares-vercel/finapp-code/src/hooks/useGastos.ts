@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Platform } from "react-native";
 import { supabase } from "../config/supabase";
+import { asegurarAutomaticos } from "../utils/automaticos";
 import { registrarPagoDeuda, reaplicarPagos } from "../utils/pagosDeuda";
 
 export interface GastoRow {
@@ -128,6 +129,7 @@ export function useGastos() {
 
   const cargarGastos = useCallback(async () => {
     setCargando(true);
+    await asegurarAutomaticos(); // anota débitos automáticos y gastos recurrentes que ya vencieron
     const { data, error: err } = await supabase.from("gastos").select("*").order("fecha", { ascending: false });
     if (err) {
       setError(err.message);

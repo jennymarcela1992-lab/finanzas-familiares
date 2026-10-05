@@ -19,6 +19,8 @@ type Fila =
 /** Tabla de amortización estilo hoja de cálculo, con desplazamiento horizontal en el celular. */
 export default function TablaAmortizacion({ deuda, onTocarCuota }: { deuda: DeudaConCuotas; onTocarCuota?: (c: CuotaRow) => void }) {
   const tieneSeguro = deuda.cuotas.some((c) => Number(c.seguro ?? 0) > 0);
+  const quincenal = (deuda as any).frecuencia === "quincenal";
+  const mesDe = (f: string) => (quincenal ? `${Number(f.slice(8, 10))} ${MESES[Number(f.slice(5, 7)) - 1]}` : MESES[Number(f.slice(5, 7)) - 1]);
 
   const filas: Fila[] = useMemo(() => {
     const cuotas = [...deuda.cuotas].sort((a, b) => a.numero_cuota - b.numero_cuota);
@@ -125,7 +127,7 @@ export default function TablaAmortizacion({ deuda, onTocarCuota }: { deuda: Deud
       <View style={styles.resumen}>
         <Dato t="Cuota" v={`$${n0(cuotaBase)}`} />
         <Dato t={`Tasa ${tipo}`} v={`${Number(deuda.tasa_interes).toLocaleString("es-CO")}%`} />
-        <Dato t="Tasa mensual" v={`${(deuda.iMensual * 100).toLocaleString("es-CO", { maximumFractionDigits: 4 })}%`} />
+        <Dato t={quincenal ? "Tasa quincenal" : "Tasa mensual"} v={`${(deuda.iMensual * 100).toLocaleString("es-CO", { maximumFractionDigits: 4 })}%`} />
         <Dato t="Tiempo" v={`${deuda.cuotas.length} cuotas`} />
         <Dato t="Prestado" v={`$${n0(deuda.montoTotal)}`} />
         <Dato t="Saldo hoy" v={`$${n0(deuda.saldoActual)}`} />
@@ -193,7 +195,7 @@ export default function TablaAmortizacion({ deuda, onTocarCuota }: { deuda: Deud
                 >
                   <Text style={[styles.celda, styles.der, { width: W.num }]}>{c.numero_cuota}</Text>
                   <Text style={[styles.celda, { width: W.anio }]}>{c.fecha_vencimiento.slice(0, 4)}</Text>
-                  <Text style={[styles.celda, { width: W.mes }]}>{MESES[Number(c.fecha_vencimiento.slice(5, 7)) - 1]}</Text>
+                  <Text style={[styles.celda, { width: W.mes }]}>{mesDe(c.fecha_vencimiento)}</Text>
                   <Text style={[styles.celda, styles.der, { width: W.si }]}>{n0(f.saldoInicial)}</Text>
                   <Text style={[styles.celda, styles.der, { width: W.cap }]}>{n2(Number(c.capital))}</Text>
                   <Text style={[styles.celda, styles.der, { width: W.int }]}>{n2(Number(c.interes))}</Text>

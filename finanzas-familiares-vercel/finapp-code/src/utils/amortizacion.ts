@@ -2,6 +2,7 @@
 // Todo es puro (sin base de datos) para poder probarlo y reutilizarlo en la pantalla.
 
 export type TipoTasa = "EA" | "MV" | "NAMV";
+export type Frecuencia = "mensual" | "quincenal";
 
 export const TIPOS_TASA: { valor: TipoTasa; etiqueta: string; ayuda: string }[] = [
   { valor: "EA", etiqueta: "E.A.", ayuda: "Efectiva anual (la más común en el extracto, ej. 24,5%)" },
@@ -15,6 +16,23 @@ export function tasaMensual(tasa: number, tipo: TipoTasa): number {
   if (tipo === "EA") return Math.pow(1 + t, 1 / 12) - 1;
   if (tipo === "NAMV") return t / 12;
   return t;
+}
+
+/** Tasa por periodo de pago: mensual, o la equivalente quincenal (dos pagos al mes). */
+export function tasaPeriodo(tasa: number, tipo: TipoTasa, frecuencia: Frecuencia = "mensual"): number {
+  const m = tasaMensual(tasa, tipo);
+  return frecuencia === "quincenal" ? Math.pow(1 + m, 0.5) - 1 : m;
+}
+
+export interface PeriodoAbono {
+  desde: string;
+  valor: number; // 0 = se deja de abonar
+}
+
+/** Abono fijo vigente en una fecha según sus periodos (el último que empezó antes o ese día). */
+export function abonoVigenteEn(periodos: PeriodoAbono[], fecha: string): number {
+  const p = periodos.filter((x) => x.desde <= fecha).sort((a, b) => b.desde.localeCompare(a.desde))[0];
+  return p ? Math.max(0, Math.round(Number(p.valor))) : 0;
 }
 
 /** Cuota fija de capital + interés (sin seguros). */
@@ -57,7 +75,8 @@ function diasDelMes(anio: number, mes: number): number {
  * Fecha de la cuota número `n` (1 = primer pago). Mantiene el día de pago y,
  * si el mes no tiene ese día (ej. 31 en febrero), usa el último día del mes.
  */
-export function fechaCuota(fechaPrimerPago: string, n: number, diaPago?: number | null): string {
+export function fechaCuota(fechaPrimerPago: string, n: number, diaPago?: number | null, frecuencia: Frecuencia = "mensual"): string {
+  if (frecuencia === "quincenal") return fechaQuincenal(fechaPrimerPago, n);
   const [a, m, d] = fechaPrimerPago.split("-").map(Number);
   const dia = diaPago && diaPago >= 1 && diaPago <= 31 ? diaPago : d;
   const total = (m - 1) + (n - 1);
@@ -65,6 +84,22 @@ export function fechaCuota(fechaPrimerPago: string, n: number, diaPago?: number 
   const mes = (((total % 12) + 12) % 12) + 1;
   const diaReal = Math.min(dia, diasDelMes(anio, mes));
   return `${anio}-${String(mes).padStart(2, "0")}-${String(diaReal).padStart(2, "0")}`;
+}
+
+/**
+ * Cuotas quincenales: dos fechas fijas por mes (ej. 15 y 30; en febrero el 28).
+ * Se toma el día de la primera cuota y su par 15 días después (o antes).
+ */
+function fechaQuincenal(fechaPrimerPago: string, n: number): string {
+  const [a, m, d] = fechaPrimerPago.split("-").map(Number);
+  const diaA = d <= 15 ? d : d - 15; // día de la primera quincena
+  const mitad = d <= 15 ? 0 : 1;
+  const idx = mitad + (n - 1);
+  const totalMeses = (m - 1) + Math.floor(idx / 2);
+  const anio = a + Math.floor(totalMeses / 12);
+  const mes = (((totalMeses % 12) + 12) % 12) + 1;
+  const dia = idx % 2 === 0 ? diaA : Math.min(diaA + 15, diasDelMes(anio, mes));
+  return `${anio}-${String(mes).padStart(2, "0")}-${String(Math.min(dia, diasDelMes(anio, mes))).padStart(2, "0")}`;
 }
 
 /** Suma meses a una fecha AAAA-MM-DD (para créditos viejos que no guardaban el primer pago). */
@@ -115,6 +150,8 @@ export function generarCuotas(params: {
   cuotaObjetivo?: number;
   abonoMensual?: number;
   abonoDesde?: string | null;
+  abonoPeriodos?: PeriodoAbono[];
+  frecuencia?: Frecuencia;
 }): FilaCuota[] & { cuotasBase?: number } {
   const { iMensual, seguroMensual, fechaPrimerPago, diaPago, numeroInicial } = params;
   let saldo = Math.round(params.saldo);
@@ -135,13 +172,13 @@ export function generarCuotas(params: {
   const filas: FilaCuota[] & { cuotasBase?: number } = [];
   for (let k = 0; k < n && saldo > 0; k++) {
     const numero = numeroInicial + k;
-    const fecha = fechaCuota(fechaPrimerPago, numero, diaPago);
+    const fecha = fechaCuota(fechaPrimerPago, numero, diaPago, params.frecuencia);
     const interes = Math.round(saldo * iMensual);
     const ultima = k === n - 1;
     let capital = cuota - interes;
     if (ultima || capital >= saldo) capital = saldo; // la última cuota cierra el saldo exacto
-    const aplicaExtra = extraMensual > 0 && (!params.abonoDesde || fecha >= params.abonoDesde);
-    const abono_extra = aplicaExtra ? Math.min(extraMensual, saldo - capital) : 0;
+    const extraHoy = params.abonoPeriodos ? abonoVigenteEn(params.abonoPeriodos, fecha) : extraMensual > 0 && (!params.abonoDesde || fecha >= params.abonoDesde) ? extraMensual : 0;
+    const abono_extra = extraHoy > 0 ? Math.min(extraHoy, saldo - capital) : 0;
     saldo = saldo - capital - abono_extra;
     const seguro = Math.round(seguroMensual || 0);
     filas.push({
@@ -160,8 +197,8 @@ export function generarCuotas(params: {
 }
 
 /** Resumen rápido para mostrar en el formulario antes de guardar. */
-export function vistaPrevia(valor: number, tasa: number, tipo: TipoTasa, plazo: number, seguro: number) {
-  const i = tasaMensual(tasa, tipo);
+export function vistaPrevia(valor: number, tasa: number, tipo: TipoTasa, plazo: number, seguro: number, frecuencia: Frecuencia = "mensual") {
+  const i = tasaPeriodo(tasa, tipo, frecuencia);
   const cuota = Math.round(cuotaFija(valor, i, plazo));
   const totalIntereses = cuota * plazo - valor;
   return { iMensual: i, cuotaSinSeguro: cuota, cuotaConSeguro: cuota + Math.round(seguro || 0), totalIntereses };
@@ -193,6 +230,8 @@ export function proyectarCuotas(p: {
   eventos?: EventoCredito[];
   abonoMensual?: number;
   abonoDesde?: string | null;
+  abonoPeriodos?: PeriodoAbono[];
+  frecuencia?: Frecuencia;
 }): { filas: FilaCuota[]; cuotasPlanInicial: number } {
   const i = p.iMensual;
   let saldo = Math.round(p.saldoInicio);
@@ -215,7 +254,7 @@ export function proyectarCuotas(p: {
   const extraMensual = Math.max(0, Math.round(p.abonoMensual || 0));
   const filas: FilaCuota[] = [];
   for (let k = p.numeroInicial; k < p.numeroInicial + 1200; k++) {
-    const fecha = fechaCuota(p.fechaPrimerPago, k, p.diaPago);
+    const fecha = fechaCuota(p.fechaPrimerPago, k, p.diaPago, p.frecuencia);
     while (e < eventos.length && eventos[e].fecha <= fecha) {
       const ev = eventos[e++];
       const restantesAntes = cierre !== null ? cierre - k + 1 : saldo > 0 ? numeroDeCuotas(saldo, i, cuota) : 1;
@@ -233,8 +272,8 @@ export function proyectarCuotas(p: {
     if (cierre === null && cuota <= interes) throw new Error("La cuota no alcanza para cubrir los intereses.");
     let capital = cuota - interes;
     if ((cierre !== null && k >= cierre) || capital >= saldo) capital = saldo;
-    const aplicaExtra = extraMensual > 0 && (!p.abonoDesde || fecha >= p.abonoDesde);
-    const abono_extra = aplicaExtra ? Math.min(extraMensual, saldo - capital) : 0;
+    const extraHoy = p.abonoPeriodos ? abonoVigenteEn(p.abonoPeriodos, fecha) : extraMensual > 0 && (!p.abonoDesde || fecha >= p.abonoDesde) ? extraMensual : 0;
+    const abono_extra = extraHoy > 0 ? Math.min(extraHoy, saldo - capital) : 0;
     saldo -= capital + abono_extra;
     const seguro = Math.round(p.seguroMensual || 0);
     filas.push({ numero_cuota: k, fecha_vencimiento: fecha, capital, interes, seguro, abono_extra, cuota_total: capital + interes + seguro + abono_extra, saldo });

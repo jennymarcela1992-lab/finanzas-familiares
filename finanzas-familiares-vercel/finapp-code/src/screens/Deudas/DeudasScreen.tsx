@@ -23,6 +23,7 @@ import {
   sumarMeses,
   formatoFecha,
   pesos,
+  Frecuencia,
 } from "../../utils/amortizacion";
 
 const FORM_VACIO = {
@@ -37,6 +38,8 @@ const FORM_VACIO = {
   cuenta: "",
   alias: "",
   activo: "" as string, // id de la propiedad o vehículo asociado
+  frecuencia: "mensual" as Frecuencia,
+  automatico: "" as string, // persona desde cuya cuenta se debita la cuota ("" = no)
 };
 
 export default function DeudasScreen() {
@@ -56,6 +59,8 @@ export default function DeudasScreen() {
     marcarPagadasHasta,
     deshacerYaPagadas,
     definirAbonoMensual,
+    eliminarPeriodoAbono,
+    desmarcarCuota,
   } = useDeudas();
 
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -67,7 +72,8 @@ export default function DeudasScreen() {
   const [abonoEn, setAbonoEn] = useState<string | null>(null);
   const [pagoEn, setPagoEn] = useState<string | null>(null);
   const [aumentoEn, setAumentoEn] = useState<string | null>(null);
-  const [vista, setVista] = useState<"tabla" | "lista">("tabla");
+  const [cambioAbonoEn, setCambioAbonoEn] = useState<string | null>(null);
+  const [vista, setVista] = useState<"tabla" | "lista" | "pagos">("tabla");
   const [yaPagadasEn, setYaPagadasEn] = useState<string | null>(null);
   const abrirPanel = (panel: "pago" | "abono" | "aumento" | "yaPagadas", id: string) => {
     setPagoEn(panel === "pago" && pagoEn !== id ? id : null);
@@ -87,8 +93,8 @@ export default function DeudasScreen() {
     const plazo = Math.round(aNumero(form.plazo));
     const seguro = aNumero(form.seguro) || 0;
     if (!(valor > 0) || !(tasa >= 0) || !(plazo > 0)) return null;
-    return vistaPrevia(valor, tasa, form.tipoTasa, plazo, seguro);
-  }, [form.valor, form.tasa, form.plazo, form.seguro, form.tipoTasa]);
+    return vistaPrevia(valor, tasa, form.tipoTasa, plazo, seguro, form.frecuencia);
+  }, [form.valor, form.tasa, form.plazo, form.seguro, form.tipoTasa, form.frecuencia]);
 
   const fechaOk = esFechaValida(form.fechaPrimerPago);
   const fechaEnPasado = fechaOk && form.fechaPrimerPago < hoyISO();
@@ -117,6 +123,8 @@ export default function DeudasScreen() {
       cuenta: d.numero_cuenta ?? "",
       alias: d.alias_pago ?? "",
       activo: d.propiedad_id ?? d.vehiculo_id ?? "",
+      frecuencia: (d.frecuencia ?? "mensual") as Frecuencia,
+      automatico: d.pago_automatico_por ?? "",
     });
     setEditandoId(d.id);
     setMostrarForm(true);
@@ -147,6 +155,8 @@ export default function DeudasScreen() {
       aliasPago: form.alias.trim() || undefined,
       propiedadId: activos.find((a) => a.id === form.activo && a.tipo === "propiedad")?.id ?? null,
       vehiculoId: activos.find((a) => a.id === form.activo && a.tipo === "vehiculo")?.id ?? null,
+      frecuencia: form.frecuencia,
+      pagoAutomaticoPor: form.automatico || null,
     };
     setGuardando(true);
     try {
@@ -175,7 +185,15 @@ export default function DeudasScreen() {
 
   function tocarCuota(c: CuotaRow) {
     if (c.estado === "pagada") {
-      Alert.alert(`Cuota #${c.numero_cuota} pagada`, `Pagó: ${c.pagada_por ?? "—"}${c.fecha_pago ? ` · ${formatoFecha(c.fecha_pago)}` : ""}\n\nPara corregirla, borra el pago en la lista "Pagos registrados".`);
+      const deuda = deudas.find((x) => x.id === c.deuda_id);
+      Alert.alert(
+        `Cuota #${c.numero_cuota} pagada`,
+        `Pagó: ${c.pagada_por ?? "—"}${c.fecha_pago ? ` · ${formatoFecha(c.fecha_pago)}` : ""}\n\n¿Quieres desmarcarla? Se borra el pago que la cubrió (y su gasto, si tiene). También puedes verlos en la pestaña "Pagos".`,
+        [
+          { text: "Dejarla pagada", style: "cancel" },
+          { text: "Desmarcar", style: "destructive", onPress: () => deuda && desmarcarCuota(deuda.id, c).catch((e) => Alert.alert("Error", e.message)) },
+        ]
+      );
     } else {
       Alert.alert(`Cuota #${c.numero_cuota}`, `Falta ${pesos(Number(c.cuota_total) - Number(c.valor_pagado ?? 0))}. Queda pagada cuando registres el pago (botón "Registrar pago", un gasto de crédito o un arriendo).`);
     }
@@ -230,7 +248,19 @@ export default function DeudasScreen() {
           </View>
           <Text style={styles.ayuda}>{TIPOS_TASA.find((t) => t.valor === form.tipoTasa)?.ayuda}</Text>
 
-          <Text style={styles.label}>Plazo total (número de cuotas)</Text>
+          <Text style={styles.label}>¿Cada cuánto se paga la cuota?</Text>
+          <View style={styles.chips}>
+            {(["mensual", "quincenal"] as const).map((fr) => (
+              <TouchableOpacity key={fr} onPress={() => setForm((f) => ({ ...f, frecuencia: fr }))} style={[styles.chip, form.frecuencia === fr && styles.chipActivo]}>
+                <Text style={[styles.chipTexto, form.frecuencia === fr && styles.chipTextoActivo]}>{fr === "mensual" ? "Mensual" : "Quincenal"}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {form.frecuencia === "quincenal" && (
+            <Text style={styles.ayuda}>Dos cuotas al mes (ej. 15 y 30). La tasa se convierte a su equivalente quincenal.</Text>
+          )}
+
+          <Text style={styles.label}>Plazo total (número de cuotas{form.frecuencia === "quincenal" ? ", quincenas" : ""})</Text>
           <TextInput style={styles.input} placeholder="Ej. 60" placeholderTextColor={colors.textMuted} value={form.plazo} onChangeText={cambiar("plazo")} keyboardType="numeric" />
 
           <Text style={styles.label}>Seguros y otros cobros fijos por mes (opcional)</Text>
@@ -249,13 +279,13 @@ export default function DeudasScreen() {
 
           {previa && (
             <View style={styles.previa}>
-              <Text style={styles.previaTitulo}>Cuota mensual calculada: {pesos(previa.cuotaConSeguro)}</Text>
+              <Text style={styles.previaTitulo}>Cuota {form.frecuencia} calculada: {pesos(previa.cuotaConSeguro)}</Text>
               <Text style={styles.previaTexto}>
                 Capital + interés {pesos(previa.cuotaSinSeguro)}
                 {previa.cuotaConSeguro !== previa.cuotaSinSeguro ? ` + seguros ${pesos(previa.cuotaConSeguro - previa.cuotaSinSeguro)}` : ""}
               </Text>
               <Text style={styles.previaTexto}>
-                Tasa mensual equivalente: {(previa.iMensual * 100).toLocaleString("es-CO", { maximumFractionDigits: 4 })}% · Intereses totales {pesos(previa.totalIntereses)}
+                Tasa {form.frecuencia === "quincenal" ? "quincenal" : "mensual"} equivalente: {(previa.iMensual * 100).toLocaleString("es-CO", { maximumFractionDigits: 4 })}% · Intereses totales {pesos(previa.totalIntereses)}
               </Text>
               <Text style={styles.ayuda}>Compárala con la cuota de tu extracto. Si no coincide, revisa el tipo de tasa o el valor de seguros.</Text>
             </View>
@@ -280,6 +310,28 @@ export default function DeudasScreen() {
               </View>
               <Text style={styles.ayuda}>Las cuotas se restan del rendimiento de esa propiedad o del carro, y el arriendo puede pagarlas directamente.</Text>
             </>
+          )}
+
+          <Text style={[styles.label, { marginTop: spacing.sm }]}>¿Es pago automático (débito)?</Text>
+          <View style={styles.chips}>
+            <TouchableOpacity onPress={() => setForm((f) => ({ ...f, automatico: "" }))} style={[styles.chip, !form.automatico && styles.chipActivo]}>
+              <Text style={[styles.chipTexto, !form.automatico && styles.chipTextoActivo]}>No</Text>
+            </TouchableOpacity>
+            {personas.map((n) => (
+              <TouchableOpacity key={n} onPress={() => setForm((f) => ({ ...f, automatico: n }))} style={[styles.chip, form.automatico === n && styles.chipActivo]}>
+                <Text style={[styles.chipTexto, form.automatico === n && styles.chipTextoActivo]}>Desde {n}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="O escribe el titular (ej. Jenny Marcela Morales Riveros)"
+            placeholderTextColor={colors.textMuted}
+            value={personas.includes(form.automatico) ? "" : form.automatico}
+            onChangeText={(t) => setForm((f) => ({ ...f, automatico: t }))}
+          />
+          {!!form.automatico && (
+            <Text style={styles.ayuda}>Cada cuota queda pagada sola el día que vence, como gasto a nombre de {form.automatico}. No hay que registrarla.</Text>
           )}
 
           <Text style={[styles.label, { marginTop: spacing.sm }]}>Dónde se paga (opcional)</Text>
@@ -322,6 +374,12 @@ export default function DeudasScreen() {
                     {d.propiedad_id ? "Propiedad" : "Carro"}: {activos.find((a) => a.id === (d.propiedad_id || d.vehiculo_id))?.nombre ?? ""}
                   </Text>
                 )}
+                <View style={styles.badges}>
+                  {d.frecuencia === "quincenal" && <Text style={styles.badge}>Quincenal</Text>}
+                  {!!d.pago_automatico_por && (
+                    <Text style={[styles.badge, styles.badgeAuto]}>Débito automático desde {d.pago_automatico_por}</Text>
+                  )}
+                </View>
               </View>
             </View>
             <Text style={styles.pctText}>{Math.round(d.porcentajePagado * 100)}%</Text>
@@ -378,39 +436,87 @@ export default function DeudasScreen() {
               />
             )}
             {aumentoEn === d.id && <FormAumento deuda={d} onCerrar={() => setAumentoEn(null)} registrar={registrarDesembolso} />}
-            {Number(d.abono_mensual ?? 0) > 0 && (
+            {d.abonosPeriodos.length > 0 && (
               <View style={styles.fijoBox}>
                 <Ionicons name="repeat" size={15} color={colors.primary} />
-                <Text style={styles.fijoTexto}>
-                  Abono fijo de {pesos(Number(d.abono_mensual))} cada mes
-                  {d.abono_mensual_desde ? ` desde ${formatoFecha(d.abono_mensual_desde)}` : ""}
-                </Text>
-                <TouchableOpacity
-                  onPress={() =>
-                    Alert.alert("Quitar abono mensual", "¿Dejar de sumar el abono fijo a las cuotas pendientes? El plazo se recalcula.", [
-                      { text: "Cancelar", style: "cancel" },
-                      { text: "Quitar", style: "destructive", onPress: () => definirAbonoMensual(d.id, 0, null).catch((e) => Alert.alert("Error", e.message)) },
-                    ])
-                  }
-                >
-                  <Text style={styles.fijoQuitar}>Quitar</Text>
-                </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fijoTexto}>
+                    {d.abonoVigente > 0 ? `Abono fijo de ${pesos(d.abonoVigente)} en cada cuota` : "Sin abono fijo vigente"}
+                  </Text>
+                  {d.abonosPeriodos.map((p, idx) => (
+                    <TouchableOpacity
+                      key={p.id ?? idx}
+                      onPress={() =>
+                        p.id &&
+                        Alert.alert("Borrar cambio", `¿Borrar el cambio a ${pesos(p.valor)} desde ${formatoFecha(p.desde)}? Las cuotas pendientes se recalculan.`, [
+                          { text: "Cancelar", style: "cancel" },
+                          { text: "Borrar", style: "destructive", onPress: () => eliminarPeriodoAbono(d.id, p.id!).catch((e) => Alert.alert("Error", e.message)) },
+                        ])
+                      }
+                    >
+                      <Text style={styles.fijoHist}>
+                        Desde {p.desde.startsWith("0000") ? "el inicio" : formatoFecha(p.desde)}: {p.valor > 0 ? pesos(p.valor) : "sin abono"}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={{ gap: 8, alignItems: "flex-end" }}>
+                  <TouchableOpacity onPress={() => setCambioAbonoEn(cambioAbonoEn === d.id ? null : d.id)}>
+                    <Text style={styles.fijoCambiar}>Cambiar valor</Text>
+                  </TouchableOpacity>
+                  {d.abonoVigente > 0 && (
+                    <TouchableOpacity
+                      onPress={() =>
+                        Alert.alert("Quitar abono fijo", "¿Dejar de sumar el abono fijo desde la próxima cuota? Las cuotas ya pagadas no cambian.", [
+                          { text: "Cancelar", style: "cancel" },
+                          {
+                            text: "Quitar",
+                            style: "destructive",
+                            onPress: () => definirAbonoMensual(d.id, 0, d.proximaCuota?.fecha_vencimiento ?? hoyISO()).catch((e) => Alert.alert("Error", e.message)),
+                          },
+                        ])
+                      }
+                    >
+                      <Text style={styles.fijoQuitar}>Quitar</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             )}
+            {cambioAbonoEn === d.id && <FormCambioAbono deuda={d} onCerrar={() => setCambioAbonoEn(null)} guardar={definirAbonoMensual} />}
 
             <View style={styles.vistaFila}>
               <Text style={[styles.label, { marginTop: spacing.md, flex: 1 }]}>Tabla de amortización</Text>
               <View style={styles.vistaChips}>
-                {(["tabla", "lista"] as const).map((v) => (
+                {(["tabla", "lista", "pagos"] as const).map((v) => (
                   <TouchableOpacity key={v} onPress={() => setVista(v)} style={[styles.vistaChip, vista === v && styles.chipActivo]}>
-                    <Ionicons name={v === "tabla" ? "grid-outline" : "list-outline"} size={13} color={vista === v ? colors.white : colors.textSecondary} />
-                    <Text style={[styles.chipTexto, { fontSize: 12 }, vista === v && styles.chipTextoActivo]}>{v === "tabla" ? "Tabla" : "Lista"}</Text>
+                    <Ionicons name={v === "tabla" ? "grid-outline" : v === "lista" ? "list-outline" : "receipt-outline"} size={13} color={vista === v ? colors.white : colors.textSecondary} />
+                    <Text style={[styles.chipTexto, { fontSize: 12 }, vista === v && styles.chipTextoActivo]}>{v === "tabla" ? "Tabla" : v === "lista" ? "Lista" : `Pagos (${d.pagos.length})`}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
             <Text style={styles.ayuda}>Una cuota queda pagada cuando se registra su pago. Toca una cuota para ver el detalle.</Text>
-            {vista === "tabla" ? (
+            {vista === "pagos" ? (
+              <View>
+                {d.pagos.length === 0 && <Text style={styles.ayuda}>Todavía no hay pagos registrados en este crédito.</Text>}
+                {d.pagos.map((p) => (
+                  <TouchableOpacity key={p.id} style={styles.cuotaRow} onPress={() => confirmarBorrarPago(p)}>
+                    <Ionicons
+                      name={p.origen === "arriendo" ? "business" : p.origen === "registro_inicial" ? "checkmark-done" : p.origen === "prestamo" ? "people" : "person"}
+                      size={14}
+                      color={colors.primary}
+                    />
+                    <Text style={[styles.cuotaTexto, { flex: 1 }]}>
+                      {formatoFecha(p.fecha)} · <Text style={{ fontWeight: "700" }}>{pesos(Number(p.valor))}</Text> · {p.pagado_por}
+                      {p.origen === "registro_inicial" ? " (ya pagada antes de la app)" : ""}
+                    </Text>
+                    <Ionicons name="close-circle-outline" size={16} color={colors.textMuted} />
+                  </TouchableOpacity>
+                ))}
+                <Text style={styles.ayuda}>Toca un pago para borrarlo; la cuota vuelve a quedar pendiente si ya no está cubierta.</Text>
+              </View>
+            ) : vista === "tabla" ? (
               <TablaAmortizacion deuda={d} onTocarCuota={tocarCuota} />
             ) : (
             <ScrollView style={{ maxHeight: 340, marginTop: spacing.xs }} nestedScrollEnabled>
@@ -440,26 +546,6 @@ export default function DeudasScreen() {
                 );
               })}
             </ScrollView>
-            )}
-
-            {d.pagos.length > 0 && (
-              <View style={{ marginTop: spacing.md }}>
-                <Text style={styles.label}>Pagos registrados</Text>
-                {d.pagos.filter((p) => p.origen !== "registro_inicial").slice(0, 12).map((p) => (
-                  <TouchableOpacity key={p.id} style={styles.cuotaRow} onPress={() => confirmarBorrarPago(p)}>
-                    <Ionicons name={p.origen === "arriendo" ? "business" : "person"} size={14} color={colors.primary} />
-                    <Text style={[styles.cuotaTexto, { flex: 1 }]}>
-                      {formatoFecha(p.fecha)} · <Text style={{ fontWeight: "700" }}>{pesos(Number(p.valor))}</Text> · {p.pagado_por}
-                    </Text>
-                    <Ionicons name="close-circle-outline" size={16} color={colors.textMuted} />
-                  </TouchableOpacity>
-                ))}
-                {d.pagos.some((p) => p.origen === "registro_inicial") && (
-                  <Text style={styles.ayuda}>
-                    {d.pagos.filter((p) => p.origen === "registro_inicial").length} cuota(s) quedaron pagadas en el registro inicial del crédito.
-                  </Text>
-                )}
-              </View>
             )}
 
             {d.desembolsos.length > 0 && (
@@ -618,6 +704,8 @@ function cuotaBase(pendientes: CuotaRow[]) {
 }
 
 function simular(deuda: DeudaConCuotas, saldo: number, extra: { cuotaObjetivo?: number; cuotasRestantes?: number; abonoMensual?: number; abonoDesde?: string | null }) {
+  // si se simula un abono fijo nuevo, se agrega como un periodo más desde su fecha
+  const periodos = extra.abonoMensual !== undefined ? [...deuda.abonosPeriodos, { desde: extra.abonoDesde ?? hoyISO(), valor: extra.abonoMensual }] : deuda.abonosPeriodos;
   const pendientes = deuda.cuotas.filter((c) => c.estado === "pendiente");
   const proxima = pendientes[0];
   if (!proxima) return null;
@@ -629,8 +717,8 @@ function simular(deuda: DeudaConCuotas, saldo: number, extra: { cuotaObjetivo?: 
       fechaPrimerPago: deuda.primerPago,
       diaPago: deuda.dia_pago,
       numeroInicial: proxima.numero_cuota,
-      abonoMensual: extra.abonoMensual ?? Number(deuda.abono_mensual ?? 0),
-      abonoDesde: extra.abonoDesde ?? deuda.abono_mensual_desde,
+      abonoPeriodos: periodos,
+      frecuencia: deuda.frecuencia ?? "mensual",
       cuotaObjetivo: extra.cuotaObjetivo,
       cuotasRestantes: extra.cuotasRestantes,
     });
@@ -830,8 +918,8 @@ function FormAbono({
               <Text style={styles.opcionDetalle}>
                 Cada mes pagarás {pesos(cuotaActual)} + {pesos(aNumero(valor) || 0)} de abono. {sim?.mensual ? textoSim(sim.mensual) : ""}
               </Text>
-              {Number(deuda.abono_mensual ?? 0) > 0 && (
-                <Text style={styles.opcionDetalle}>Reemplaza el abono fijo actual de {pesos(Number(deuda.abono_mensual))}.</Text>
+              {deuda.abonoVigente > 0 && (
+                <Text style={styles.opcionDetalle}>Reemplaza el abono fijo actual de {pesos(deuda.abonoVigente)} desde esa fecha.</Text>
               )}
             </View>
           </View>
@@ -839,6 +927,50 @@ function FormAbono({
       )}
 
       <PrimaryButton title={frecuencia === "mensual" ? "Guardar abono mensual" : destino === "cuotas" ? "Registrar adelanto" : "Registrar abono a capital"} onPress={guardar} loading={guardando} style={{ marginTop: spacing.sm }} />
+      <PrimaryButton title="Cancelar" variant="outline" onPress={onCerrar} style={{ marginTop: spacing.sm }} />
+    </View>
+  );
+}
+
+// ---------- Cambiar el valor del abono fijo ----------
+function FormCambioAbono({ deuda, onCerrar, guardar }: { deuda: DeudaConCuotas; onCerrar: () => void; guardar: (id: string, valor: number, desde: string | null) => Promise<void> }) {
+  const [valor, setValor] = useState(deuda.abonoVigente ? Math.round(deuda.abonoVigente).toLocaleString("es-CO") : "");
+  const [desde, setDesde] = useState(deuda.proximaCuota?.fecha_vencimiento ?? hoyISO());
+  const [guardando, setGuardando] = useState(false);
+  const pendientes = deuda.cuotas.filter((c) => c.estado === "pendiente");
+  const v = aNumero(valor);
+  const sim = v >= 0 && pendientes.length ? simular(deuda, deuda.saldoActual, { cuotaObjetivo: cuotaBase(pendientes), abonoMensual: v || 0, abonoDesde: desde }) : null;
+  return (
+    <View style={styles.abonoBox}>
+      <Text style={typography.h3}>Cambiar el abono fijo</Text>
+      <Text style={styles.ayuda}>Las cuotas antes de la fecha conservan el valor anterior ({pesos(deuda.abonoVigente)}).</Text>
+      <Text style={styles.label}>Nuevo valor por cuota</Text>
+      <TextInput style={styles.input} value={valor} onChangeText={setValor} keyboardType="numeric" placeholder="Ej. 1.000.000" placeholderTextColor={colors.textMuted} />
+      <Text style={styles.label}>Desde la cuota que vence</Text>
+      <FechaInput value={desde} onChange={setDesde} />
+      {sim && !(sim as any).error && (
+        <Text style={styles.opcionDetalle}>
+          Quedan {(sim as any).cuotas} cuotas (antes {pendientes.length}){(sim as any).fin ? ` · terminas ${formatoFecha((sim as any).fin)}` : ""}
+          {(sim as any).difIntereses > 0 ? ` · ahorras ${pesos((sim as any).difIntereses)} en intereses` : ""}
+        </Text>
+      )}
+      <PrimaryButton
+        title="Guardar nuevo valor"
+        loading={guardando}
+        style={{ marginTop: spacing.sm }}
+        onPress={async () => {
+          if (!(v >= 0)) return Alert.alert("Valor no válido", "Escribe el nuevo abono (0 para quitarlo).");
+          setGuardando(true);
+          try {
+            await guardar(deuda.id, v, desde);
+            onCerrar();
+          } catch (e: any) {
+            Alert.alert("Error", e.message);
+          } finally {
+            setGuardando(false);
+          }
+        }}
+      />
       <PrimaryButton title="Cancelar" variant="outline" onPress={onCerrar} style={{ marginTop: spacing.sm }} />
     </View>
   );
@@ -1056,6 +1188,11 @@ const styles = StyleSheet.create({
   vistaChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: colors.background },
   fijoBox: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.md, backgroundColor: colors.primaryLight, borderRadius: radius.sm, padding: spacing.sm },
   fijoTexto: { flex: 1, fontSize: 12, color: colors.primary, fontWeight: "600" },
+  fijoHist: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
+  fijoCambiar: { fontSize: 12, color: colors.primary, fontWeight: "700" },
+  badges: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2 },
+  badge: { fontSize: 10, fontWeight: "700", color: colors.primary, backgroundColor: colors.primaryLight, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: "hidden" },
+  badgeAuto: { color: colors.success, backgroundColor: "#E3F3EC" },
   fijoQuitar: { fontSize: 12, color: colors.danger, fontWeight: "700" },
   abonoBox: { marginTop: spacing.md, padding: spacing.md, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border },
   opcion: { flexDirection: "row", gap: 8, alignItems: "flex-start", padding: spacing.sm, borderRadius: radius.sm, marginBottom: spacing.xs },
