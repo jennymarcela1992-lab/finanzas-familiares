@@ -54,6 +54,7 @@ export default function PropiedadesScreen() {
     crearPropiedad,
     editarPropiedad,
     eliminarPropiedad,
+    moverAVehiculo,
     guardarContrato,
     terminarContrato,
     eliminarContrato,
@@ -425,6 +426,26 @@ export default function PropiedadesScreen() {
             <Ionicons name="create" size={15} color={colors.primary} />
             <Text style={styles.accionTexto}>Editar</Text>
           </TouchableOpacity>
+          {!p.genera_ingresos && (
+            <TouchableOpacity
+              style={styles.accion}
+              onPress={() =>
+                Alert.alert("Mover a Vehículos", `¿${p.nombre} es un vehículo? Se pasa a Vehículos (uso propio, con su valor comercial) junto con sus gastos y créditos, y se quita de Propiedades.`, [
+                  { text: "Cancelar", style: "cancel" },
+                  {
+                    text: "Mover",
+                    onPress: () =>
+                      moverAVehiculo(p)
+                        .then(() => Alert.alert("Listo", `${p.nombre} ahora está en Vehículos.`))
+                        .catch((e) => Alert.alert("Error", e.message)),
+                  },
+                ])
+              }
+            >
+              <Ionicons name="car" size={15} color={colors.primary} />
+              <Text style={styles.accionTexto}>Es un vehículo</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={styles.accion}
             onPress={() =>

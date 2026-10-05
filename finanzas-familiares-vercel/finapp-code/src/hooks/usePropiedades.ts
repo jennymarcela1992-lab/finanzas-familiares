@@ -276,6 +276,36 @@ export function usePropiedades() {
     await cargar();
   }
 
+  /**
+   * Se anotó por error como propiedad pero es un vehículo: lo crea en Vehículos (de uso propio, con su valor)
+   * y le pasa los gastos, gastos automáticos y créditos asociados. Luego borra la propiedad.
+   */
+  async function moverAVehiculo(p: PropiedadConDetalle) {
+    const placa = (p.nombre.match(/\b([A-Z]{3}\s?-?\d{2,3}[A-Z]?)\b/i)?.[1] ?? "").replace(/[\s-]/g, "").toUpperCase() || null;
+    const { data: v, error: errV } = await supabase
+      .from("vehiculos")
+      .insert({
+        // "Moto FLJ51F" → nombre "Moto", placa "FLJ51F"
+        nombre: (placa ? p.nombre.replace(/\b[A-Z]{3}\s?-?\d{2,3}[A-Z]?\b/i, "").replace(/\s+/g, " ").trim() : p.nombre) || p.nombre,
+        placa,
+        cuota_diaria: 0,
+        dia_descanso: 0,
+        genera_ingresos: false,
+        valor_comercial: p.valor_comercial ?? null,
+      })
+      .select()
+      .single();
+    if (errV) throw errV;
+    await supabase.from("gastos").update({ vehiculo_id: v.id, propiedad_id: null }).eq("propiedad_id", p.id);
+    await supabase.from("gastos_recurrentes").update({ vehiculo_id: v.id, propiedad_id: null }).eq("propiedad_id", p.id);
+    await supabase.from("deuda_activos").update({ vehiculo_id: v.id, propiedad_id: null }).eq("propiedad_id", p.id);
+    await supabase.from("deudas").update({ vehiculo_id: v.id, propiedad_id: null }).eq("propiedad_id", p.id);
+    await supabase.from("propiedades").update({ credito_id: null }).eq("id", p.id);
+    const { error: errDel } = await supabase.from("propiedades").delete().eq("id", p.id);
+    if (errDel) throw errDel;
+    await cargar();
+  }
+
   /** Crea un contrato nuevo (o corrige uno existente si se pasa su id). */
   async function guardarContrato(propiedadId: string, c: DatosContrato, contratoId: string | null, recargar = true) {
     const filaC = {
@@ -380,6 +410,7 @@ export function usePropiedades() {
     crearPropiedad,
     editarPropiedad,
     eliminarPropiedad,
+    moverAVehiculo,
     guardarContrato,
     terminarContrato,
     eliminarContrato,
