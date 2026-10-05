@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
-import { TipoTasa, tasaMensual, generarCuotas, hoyISO } from "../utils/amortizacion";
+import { TipoTasa, tasaMensual, tasaPeriodo, generarCuotas, fechaCuota, hoyISO, FilaCuota } from "../utils/amortizacion";
 import { registrarPagoDeuda, reaplicarPagos } from "../utils/pagosDeuda";
 import { personasDelHogar, esDelHogar } from "../utils/aportes";
 
@@ -42,6 +42,14 @@ export interface PrestamoConAbonos {
   tipo_tasa: TipoTasa | null;
   plazo_meses: number | null;
   fecha_primer_pago: string | null;
+  es_inversion: boolean;
+  deuda_origen_id: string | null;
+  solo_intereses: boolean;
+  deudaOrigen: { id: string; nombre: string; iMensual: number } | null;
+  interesesRecibidos: number; // parte de los pagos que corresponde a intereses
+  capitalRecuperado: number; // parte de los pagos que devuelve el capital prestado
+  capitalPendiente: number;
+  interesesPorRecibir: number;
   abonos: AbonoRow[];
   totalAbonado: number;
   saldoPendiente: number; // lo que falta por pagar (con intereses si tiene cuotas)
@@ -63,21 +71,46 @@ export interface DatosPrestamo {
   tipoTasa?: TipoTasa;
   plazoMeses?: number | null;
   fechaPrimerPago?: string | null;
+  esInversion?: boolean;
+  deudaOrigenId?: string | null;
+  soloIntereses?: boolean;
 }
 
 export type DestinoAbono = { tipo: "hogar" } | { tipo: "persona"; persona: string } | { tipo: "credito"; deudaId: string };
 
+/** Cada mes se pagan solo los intereses; en la última cuota se devuelve todo el capital. */
+export function cuotasSoloIntereses(monto: number, iMensual: number, fechaPrimerPago: string, plazo: number): FilaCuota[] {
+  const interes = Math.round(monto * iMensual);
+  return Array.from({ length: plazo }, (_, k) => {
+    const n = k + 1;
+    const ultima = n === plazo;
+    return {
+      numero_cuota: n,
+      fecha_vencimiento: fechaCuota(fechaPrimerPago, n),
+      capital: ultima ? Math.round(monto) : 0,
+      interes,
+      seguro: 0,
+      abono_extra: 0,
+      cuota_total: interes + (ultima ? Math.round(monto) : 0),
+      saldo: ultima ? 0 : Math.round(monto),
+    };
+  });
+}
+
 /** Tabla de cuotas del préstamo y cómo los abonos recibidos las van cubriendo (en orden). */
 function construirCuotas(p: any, abonos: AbonoRow[], nombreDestino: (a: AbonoRow) => string): CuotaPrestamo[] {
   if (!p.plazo_meses || !p.fecha_primer_pago) return [];
-  const filas = generarCuotas({
-    saldo: Number(p.monto),
-    iMensual: tasaMensual(Number(p.tasa ?? 0), (p.tipo_tasa ?? "MV") as TipoTasa),
-    seguroMensual: 0,
-    fechaPrimerPago: p.fecha_primer_pago,
-    numeroInicial: 1,
-    cuotasRestantes: Number(p.plazo_meses),
-  });
+  const iMensual = tasaMensual(Number(p.tasa ?? 0), (p.tipo_tasa ?? "MV") as TipoTasa);
+  const filas = p.solo_intereses
+    ? cuotasSoloIntereses(Number(p.monto), iMensual, p.fecha_primer_pago, Number(p.plazo_meses))
+    : generarCuotas({
+        saldo: Number(p.monto),
+        iMensual,
+        seguroMensual: 0,
+        fechaPrimerPago: p.fecha_primer_pago,
+        numeroInicial: 1,
+        cuotasRestantes: Number(p.plazo_meses),
+      });
   const ordenados = [...abonos].sort((a, b) => a.fecha.localeCompare(b.fecha));
   let i = 0;
   let disponible = ordenados.length ? Number(ordenados[0].monto) : 0;
@@ -117,7 +150,7 @@ export function usePrestamos() {
     const [rP, rA, rD, hogar] = await Promise.all([
       supabase.from("prestamos_personales").select("*").order("fecha", { ascending: false }),
       supabase.from("abonos_prestamo").select("*").order("fecha", { ascending: false }),
-      supabase.from("deudas").select("id, nombre"),
+      supabase.from("deudas").select("*"),
       personasDelHogar(),
     ]);
     if (rP.error || rA.error) {
@@ -125,7 +158,8 @@ export function usePrestamos() {
       setCargando(false);
       return;
     }
-    const nombreDeuda = new Map((rD.data ?? []).map((d: any) => [d.id, d.nombre]));
+    const deudasRows = (rD.data ?? []) as any[];
+    const nombreDeuda = new Map(deudasRows.map((d: any) => [d.id, d.nombre]));
     const nombreDestino = (a: AbonoRow) =>
       a.deuda_id ? `→ ${nombreDeuda.get(a.deuda_id) ?? "crédito"}` : a.destino_persona ? a.destino_persona : "Hogar";
 
@@ -134,10 +168,40 @@ export function usePrestamos() {
       const totalAbonado = abonos.reduce((s, a) => s + Number(a.monto), 0);
       const cuotas = construirCuotas(p, abonos, nombreDestino);
       const pendientes = cuotas.filter((c) => c.estado === "pendiente");
+      // separar lo recibido entre intereses y capital (cada cuota paga primero intereses)
+      let interesesRecibidos = 0;
+      let capitalRecuperado = 0;
+      let interesesPorRecibir = 0;
+      if (cuotas.length) {
+        for (const c of cuotas) {
+          const aInteres = Math.min(c.valor_pagado, c.interes);
+          interesesRecibidos += aInteres;
+          capitalRecuperado += Math.max(0, Math.min(c.valor_pagado - aInteres, c.capital));
+          interesesPorRecibir += c.interes - aInteres;
+        }
+      } else {
+        capitalRecuperado = Math.min(totalAbonado, Number(p.monto));
+        interesesRecibidos = Math.max(totalAbonado - Number(p.monto), 0);
+      }
+      const dOrigen = p.deuda_origen_id ? deudasRows.find((d) => d.id === p.deuda_origen_id) : null;
       const presta = esDelHogar(p.quien_presta, hogar.personas);
       const recibe = esDelHogar(p.quien_recibe, hogar.personas);
       return {
         ...p,
+        es_inversion: !!p.es_inversion,
+        deuda_origen_id: p.deuda_origen_id ?? null,
+        solo_intereses: !!p.solo_intereses,
+        deudaOrigen: dOrigen
+          ? {
+              id: dOrigen.id,
+              nombre: dOrigen.nombre,
+              iMensual: tasaPeriodo(Number(dOrigen.tasa_interes ?? 0), (dOrigen.tipo_tasa ?? "MV") as TipoTasa, "mensual"),
+            }
+          : null,
+        interesesRecibidos: Math.round(interesesRecibidos),
+        capitalRecuperado: Math.round(capitalRecuperado),
+        capitalPendiente: Math.max(0, Math.round(Number(p.monto) - capitalRecuperado)),
+        interesesPorRecibir: Math.round(interesesPorRecibir),
         abonos,
         totalAbonado,
         conCuotas: cuotas.length > 0,
@@ -171,6 +235,9 @@ export function usePrestamos() {
       tipo_tasa: d.tipoTasa ?? "MV",
       plazo_meses: d.plazoMeses ?? null,
       fecha_primer_pago: d.plazoMeses ? d.fechaPrimerPago ?? null : null,
+      es_inversion: !!d.esInversion,
+      deuda_origen_id: d.deudaOrigenId ?? null,
+      solo_intereses: d.plazoMeses ? !!d.soloIntereses : false,
     };
   }
 

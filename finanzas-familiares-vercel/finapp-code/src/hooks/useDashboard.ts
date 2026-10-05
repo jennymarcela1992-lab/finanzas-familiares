@@ -81,7 +81,7 @@ export function useDashboard(mes: string) {
     const [hogar, rAm, rPre, rAbP, rMov] = await Promise.all([
       personasDelHogar(),
       supabase.from("aportes_mes").select("mes, usuario_nombre, aporte").gte("mes", meses[0]).lte("mes", mes),
-      supabase.from("prestamos_personales").select("id, quien_presta, quien_recibe, monto, fecha"),
+      supabase.from("prestamos_personales").select("*"),
       supabase.from("abonos_prestamo").select("prestamo_id, monto, fecha").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("movimientos_inversion").select("tipo, monto, fecha").gte("fecha", desde).lt("fecha", hasta),
     ]);
@@ -149,7 +149,8 @@ export function useDashboard(mes: string) {
       const b = porMes.get(mesDe(p.fecha));
       if (!b) return;
       const d = direccion(p);
-      if (d === "prestamos") b.otrasSalidas += Number(p.monto);
+      // si el dinero salió de un crédito, no sale de la plata del hogar
+      if (d === "prestamos" && !p.deuda_origen_id) b.otrasSalidas += Number(p.monto);
       if (d === "nos_prestan") b.prestamosCobrados += Number(p.monto);
     });
     (rAbP.error ? [] : rAbP.data ?? []).forEach((a: any) => {
@@ -157,7 +158,9 @@ export function useDashboard(mes: string) {
       const b = porMes.get(mesDe(a.fecha));
       if (!p || !b) return;
       const d = direccion(p);
-      if (d === "prestamos") b.prestamosCobrados += Number(a.monto);
+      // préstamos que son inversión: lo que pagan cuenta como ingreso de inversiones
+      if (d === "prestamos" && p.es_inversion) b.inversiones += Number(a.monto);
+      else if (d === "prestamos") b.prestamosCobrados += Number(a.monto);
       if (d === "nos_prestan") b.otrasSalidas += Number(a.monto);
     });
 

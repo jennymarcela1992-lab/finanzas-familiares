@@ -1,16 +1,20 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Alert, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useInversiones, InversionConIndicadores } from "../../hooks/useInversiones";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
+import PrestamosPanel, { PrestamosPanelRef } from "../../components/PrestamosPanel";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
 
 export default function InversionesScreen() {
   const { inversiones, cargando, error, crearInversion, agregarMovimiento } = useInversiones();
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [pestana, setPestana] = useState<"proyectos" | "prestamos">("proyectos");
+  const panel = useRef<PrestamosPanelRef>(null);
+  const [formPrestamo, setFormPrestamo] = useState(false);
   const [nombre, setNombre] = useState("");
   const [tipo, setTipo] = useState("");
   const [inversionInicial, setInversionInicial] = useState("");
@@ -53,8 +57,30 @@ export default function InversionesScreen() {
 
   return (
     <View style={styles.container}>
-      <ScreenHeader title="Inversiones" subtitle="Miniproyectos" actionLabel="Nueva" onAction={() => setMostrarForm(!mostrarForm)} actionActive={mostrarForm} />
+      <ScreenHeader
+        title="Inversiones"
+        subtitle={pestana === "proyectos" ? "Miniproyectos" : "Préstamos que nos pagan intereses"}
+        actionLabel={pestana === "proyectos" ? "Nueva" : "Nuevo préstamo"}
+        onAction={() => (pestana === "proyectos" ? setMostrarForm(!mostrarForm) : panel.current?.abrirNuevo())}
+        actionActive={pestana === "proyectos" ? mostrarForm : formPrestamo}
+      />
 
+      <View style={styles.tabs}>
+        {([
+          ["proyectos", "Proyectos", "trending-up"],
+          ["prestamos", "Préstamos con intereses", "cash"],
+        ] as const).map(([k, t, icono]) => (
+          <TouchableOpacity key={k} style={[styles.tab, pestana === k && styles.tabActivo]} onPress={() => setPestana(k)}>
+            <Ionicons name={icono} size={14} color={pestana === k ? colors.white : colors.primary} />
+            <Text style={[styles.tabTxt, pestana === k && { color: colors.white }]}>{t}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {pestana === "prestamos" ? (
+        <PrestamosPanel ref={panel} modo="inversion" onFormCambia={(abierto, editando) => setFormPrestamo(abierto && !editando)} />
+      ) : (
+      <>
       {mostrarForm && (
         <Card style={{ marginHorizontal: spacing.lg }}>
           <TextInput style={styles.input} placeholder="Nombre del proyecto" placeholderTextColor={colors.textMuted} value={nombre} onChangeText={setNombre} />
@@ -100,6 +126,8 @@ export default function InversionesScreen() {
           )}
         />
       )}
+      </>
+      )}
 
       <Modal visible={!!invSeleccionada} transparent animationType="slide">
         <View style={styles.modalFondo}>
@@ -128,6 +156,10 @@ export default function InversionesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  tabs: { flexDirection: "row", gap: 8, paddingHorizontal: spacing.lg, marginBottom: spacing.md },
+  tab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.primary },
+  tabActivo: { backgroundColor: colors.primary },
+  tabTxt: { fontSize: 12, fontWeight: "700", color: colors.primary },
   input: { backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm, fontSize: 15, color: colors.textPrimary },
   rowStart: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   iconoCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
