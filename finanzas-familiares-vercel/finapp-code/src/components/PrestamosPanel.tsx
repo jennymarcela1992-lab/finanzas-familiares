@@ -25,6 +25,7 @@ const FORM_VACIO = {
   plazo: "",
   primerPago: sumarMeses(hoyISO(), 1),
   esInversion: false,
+  direccion: "prestamos" as "prestamos" | "nos_prestan" | "interno",
   deudaOrigen: "",
   soloIntereses: false,
 };
@@ -84,7 +85,7 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
 
   function abrirNuevo() {
     if (mostrarForm && !editandoId) return setMostrarForm(false);
-    setForm({ ...FORM_VACIO, quienPresta: personas[0] ?? "", esInversion: modo === "inversion", conCuotas: true });
+    setForm({ ...FORM_VACIO, quienPresta: personas[0] ?? "", esInversion: modo === "inversion", conCuotas: true, direccion: "prestamos" });
     setEditandoId(null);
     setMostrarForm(true);
   }
@@ -104,6 +105,7 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
       plazo: p.plazo_meses ? String(p.plazo_meses) : "",
       primerPago: p.fecha_primer_pago ?? sumarMeses(hoyISO(), 1),
       esInversion: p.es_inversion,
+      direccion: p.direccion,
       deudaOrigen: p.deuda_origen_id ?? "",
       soloIntereses: p.solo_intereses,
     });
@@ -129,7 +131,10 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
       esInversion: form.esInversion,
       deudaOrigenId: form.deudaOrigen || null,
       soloIntereses: form.conCuotas && form.soloIntereses,
+      direccion: form.direccion,
     };
+    if (form.esInversion && form.direccion !== "prestamos")
+      return Alert.alert("Revisa", "Un préstamo de Inversiones es uno que el hogar le hizo a alguien. Elige «Nosotros le prestamos a alguien» o apaga «Es una inversión».");
     setGuardando(true);
     try {
       if (editandoId) await editarPrestamo(editandoId, datos);
@@ -294,7 +299,6 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
     const abiertoP = abierto === p.id;
     const total = p.conCuotas ? p.cuotas.reduce((s, c) => s + c.cuota_total, 0) : Number(p.monto);
     const avance = total > 0 ? Math.min(1, p.totalAbonado / total) : 0;
-    const tercero = p.direccion === "prestamos" ? p.quien_recibe : p.direccion === "nos_prestan" ? p.quien_presta : null;
     // objeto compatible con la tabla de amortización de créditos
     const comoDeuda: any = {
       nombre: `Préstamo ${p.quien_recibe}`,
@@ -323,7 +327,7 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
               <Text style={typography.caption}>
                 {pesos(Number(p.monto))} · {formatoFecha(String(p.fecha).slice(0, 10))}
                 {p.motivo ? ` · ${p.motivo}` : ""}
-                {tercero ? (p.direccion === "prestamos" ? " · le prestamos a un tercero" : " · nos prestó un tercero") : ""}
+                {p.direccion === "prestamos" ? " · le prestamos" : p.direccion === "nos_prestan" ? " · nos prestaron" : " · entre nosotros"}
               </Text>
             </View>
             <Text style={styles.pct}>{Math.round(avance * 100)}%</Text>
@@ -424,17 +428,59 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
         <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }} keyboardShouldPersistTaps="handled">
           <Card>
             <Text style={[typography.h3, { marginBottom: spacing.sm }]}>{editandoId ? "Editar préstamo" : "Nuevo préstamo"}</Text>
-            <Text style={styles.label}>¿Quién prestó?</Text>
+            <Text style={styles.label}>¿Quién le prestó a quién?</Text>
             <View style={styles.chips}>
-              {personas.map((n) => (
-                <TouchableOpacity key={n} onPress={() => cambiar("quienPresta")(n)} style={[styles.chip, form.quienPresta === n && styles.chipActivo]}>
-                  <Text style={[styles.chipTxt, form.quienPresta === n && styles.chipTxtActivo]}>{n}</Text>
+              {(
+                [
+                  ["prestamos", "Nosotros le prestamos a alguien"],
+                  ["nos_prestan", "Alguien nos prestó"],
+                  ["interno", "Entre nosotros"],
+                ] as const
+              ).map(([k, t]) => (
+                <TouchableOpacity
+                  key={k}
+                  onPress={() =>
+                    setForm((f) => ({
+                      ...f,
+                      direccion: k,
+                      // ubica a la persona del hogar en el lado que corresponde
+                      quienPresta: k === "nos_prestan" ? (personas.includes(f.quienPresta) ? "" : f.quienPresta) : personas.includes(f.quienPresta) ? f.quienPresta : personas[0] ?? "",
+                      quienRecibe: k === "nos_prestan" ? (personas.includes(f.quienRecibe) ? f.quienRecibe : personas[0] ?? "") : personas.includes(f.quienRecibe) && k === "prestamos" ? "" : f.quienRecibe,
+                    }))
+                  }
+                  style={[styles.chip, form.direccion === k && styles.chipActivo]}
+                >
+                  <Text style={[styles.chipTxt, form.direccion === k && styles.chipTxtActivo]}>{t}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            <TextInput style={styles.input} placeholder="O escribe el nombre (si fue un tercero)" placeholderTextColor={colors.textMuted} value={form.quienPresta} onChangeText={cambiar("quienPresta")} />
-            <Text style={styles.label}>¿Quién recibió el préstamo?</Text>
-            <TextInput style={styles.input} placeholder="Ej. Carlos (primo)" placeholderTextColor={colors.textMuted} value={form.quienRecibe} onChangeText={cambiar("quienRecibe")} />
+
+            <Text style={styles.label}>{form.direccion === "nos_prestan" ? "¿Quién nos prestó? (nombre o entidad)" : "¿Quién del hogar prestó?"}</Text>
+            {form.direccion !== "nos_prestan" && (
+              <View style={styles.chips}>
+                {[...personas, "Hogar"].map((n) => (
+                  <TouchableOpacity key={n} onPress={() => cambiar("quienPresta")(n)} style={[styles.chip, form.quienPresta === n && styles.chipActivo]}>
+                    <Text style={[styles.chipTxt, form.quienPresta === n && styles.chipTxtActivo]}>{n}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            {form.direccion === "nos_prestan" && (
+              <TextInput style={styles.input} placeholder="Ej. Mamá, Banco…" placeholderTextColor={colors.textMuted} value={form.quienPresta} onChangeText={cambiar("quienPresta")} />
+            )}
+
+            <Text style={styles.label}>{form.direccion === "prestamos" ? "¿A quién le prestamos? (nombre)" : "¿Quién del hogar lo recibió?"}</Text>
+            {form.direccion === "prestamos" ? (
+              <TextInput style={styles.input} placeholder="Ej. Jenny Ostos" placeholderTextColor={colors.textMuted} value={form.quienRecibe} onChangeText={cambiar("quienRecibe")} />
+            ) : (
+              <View style={styles.chips}>
+                {[...personas, "Hogar"].map((n) => (
+                  <TouchableOpacity key={n} onPress={() => cambiar("quienRecibe")(n)} style={[styles.chip, form.quienRecibe === n && styles.chipActivo]}>
+                    <Text style={[styles.chipTxt, form.quienRecibe === n && styles.chipTxtActivo]}>{n}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
             <Text style={styles.label}>Valor prestado</Text>
             <TextInput style={styles.input} placeholder="Ej. 5.000.000" placeholderTextColor={colors.textMuted} value={form.monto} onChangeText={cambiar("monto")} keyboardType="numeric" />
             <Text style={styles.label}>Fecha del préstamo</Text>

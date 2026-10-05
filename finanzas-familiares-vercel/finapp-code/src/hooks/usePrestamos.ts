@@ -76,6 +76,7 @@ export interface DatosPrestamo {
   esInversion?: boolean;
   deudaOrigenId?: string | null;
   soloIntereses?: boolean;
+  direccion?: "prestamos" | "nos_prestan" | "interno";
 }
 
 export type DestinoAbono =
@@ -216,7 +217,16 @@ export function usePrestamos() {
         saldoPendiente: cuotas.length
           ? pendientes.reduce((s, c) => s + c.cuota_total - c.valor_pagado, 0)
           : Math.max(Number(p.monto) - totalAbonado, 0),
-        direccion: presta && !recibe ? "prestamos" : !presta && recibe ? "nos_prestan" : "interno",
+        // dirección guardada; si no hay, un préstamo-inversión siempre es "le prestamos"; si no, se deduce por los nombres
+        direccion: (["prestamos", "nos_prestan", "interno"].includes(p.direccion)
+          ? p.direccion
+          : p.es_inversion
+          ? "prestamos"
+          : presta && !recibe
+          ? "prestamos"
+          : !presta && recibe
+          ? "nos_prestan"
+          : "interno") as PrestamoConAbonos["direccion"],
         iMensual: tasaMensual(Number(p.tasa ?? 0), (p.tipo_tasa ?? "MV") as TipoTasa),
       };
     });
@@ -243,17 +253,26 @@ export function usePrestamos() {
       es_inversion: !!d.esInversion,
       deuda_origen_id: d.deudaOrigenId ?? null,
       solo_intereses: d.plazoMeses ? !!d.soloIntereses : false,
+      ...(d.direccion ? { direccion: d.direccion } : {}),
     };
   }
 
+  // si aún no se corrió el SQL 11 (columna "direccion"), se guarda sin ella
+  const sinDireccion = (f: any) => {
+    const { direccion, ...resto } = f;
+    return resto;
+  };
+
   async function crearPrestamo(d: DatosPrestamo) {
-    const { error: err } = await supabase.from("prestamos_personales").insert(fila(d));
+    let { error: err } = await supabase.from("prestamos_personales").insert(fila(d));
+    if (err && /direccion/.test(err.message)) ({ error: err } = await supabase.from("prestamos_personales").insert(sinDireccion(fila(d))));
     if (err) throw err;
     await cargar();
   }
 
   async function editarPrestamo(id: string, d: DatosPrestamo) {
-    const { error: err } = await supabase.from("prestamos_personales").update(fila(d)).eq("id", id);
+    let { error: err } = await supabase.from("prestamos_personales").update(fila(d)).eq("id", id);
+    if (err && /direccion/.test(err.message)) ({ error: err } = await supabase.from("prestamos_personales").update(sinDireccion(fila(d))).eq("id", id));
     if (err) throw err;
     await cargar();
   }

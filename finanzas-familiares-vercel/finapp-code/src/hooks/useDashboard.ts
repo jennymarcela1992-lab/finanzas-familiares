@@ -142,6 +142,8 @@ export function useDashboard(mes: string) {
     // Préstamos con terceros: lo que nos devuelven es entrada; lo que prestamos es salida
     const prestamos = new Map((rPre.error ? [] : rPre.data ?? []).map((p: any) => [p.id, p]));
     const direccion = (p: any): "prestamos" | "nos_prestan" | "interno" => {
+      if (["prestamos", "nos_prestan", "interno"].includes(p.direccion)) return p.direccion;
+      if (p.es_inversion) return "prestamos";
       const presta = esDelHogar(p.quien_presta, hogar.personas);
       const recibe = esDelHogar(p.quien_recibe, hogar.personas);
       if (presta && !recibe) return "prestamos";
