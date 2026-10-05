@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Platform } from "react-native";
 import { supabase } from "../config/supabase";
+import { mismaPersona } from "../utils/aportes";
 import { asegurarAutomaticos } from "../utils/automaticos";
 import { registrarPagoDeuda, reaplicarPagos } from "../utils/pagosDeuda";
 
@@ -166,7 +167,7 @@ export function useGastos() {
       valor: nuevo.valor,
       moneda: nuevo.moneda ?? "COP",
       valor_cop: nuevo.valorCop ?? nuevo.valor,
-      usuario_pago_id: pagadoPor === yoNombre ? usuario?.id : null,
+      usuario_pago_id: mismaPersona(pagadoPor, yoNombre) ? usuario?.id : null,
       usuario_pago_nombre: pagadoPor,
       rubro: nuevo.rubro,
       es_compartido: nuevo.esCompartido,
@@ -239,7 +240,7 @@ export function useGastos() {
         ...(cambios.pagadoPor
           ? {
               usuario_pago_nombre: cambios.pagadoPor,
-              usuario_pago_id: cambios.pagadoPor === (usuario?.user_metadata?.nombre ?? usuario?.email) ? usuario?.id ?? null : null,
+              usuario_pago_id: mismaPersona(cambios.pagadoPor, usuario?.user_metadata?.nombre ?? usuario?.email) ? usuario?.id ?? null : null,
             }
           : {}),
       })

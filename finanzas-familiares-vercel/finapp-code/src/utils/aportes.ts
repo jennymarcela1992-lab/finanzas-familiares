@@ -7,26 +7,66 @@ export interface AportePersona {
   esBase: boolean; // true = no se ha ajustado, se usa el valor base
 }
 
-/** Personas del hogar (usuarios registrados) y el primer mes en que empezaron a usar la app. */
-export async function personasDelHogar(): Promise<{ personas: string[]; mesInicio: string | null }> {
-  const [{ data }, { data: aportes }] = await Promise.all([
-    supabase.from("usuarios").select("nombre, email, creado_en"),
+const sinTildes = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+const palabras = (x: string) => sinTildes(x).split(/\s+/).filter(Boolean);
+
+/**
+ * ¿Dos nombres son la misma persona del hogar? Ej. "Jhon Ostos" y "Jhon Fredy Ostos Torres",
+ * o "Jenny" y "Jenny Marcela Morales": el nombre corto está contenido en el largo y empiezan igual.
+ */
+export function mismaPersona(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  const A = palabras(a);
+  const B = palabras(b);
+  if (!A.length || !B.length) return false;
+  const [corto, largo] = A.length <= B.length ? [A, B] : [B, A];
+  return corto[0] === largo[0] && corto.every((w) => largo.includes(w));
+}
+
+/** Nombre con el que se muestra a alguien: el de la lista del hogar que corresponde (o el mismo si no hay). */
+export function nombreCanonico(nombre: string, personas: string[]): string {
+  return personas.find((p) => mismaPersona(p, nombre)) ?? nombre;
+}
+
+/**
+ * Personas del hogar: usuarios registrados y las agregadas a mano en Ingresos, sin repetir a nadie
+ * (cada usuario lo anota con su nombre completo y el otro quizá con uno corto). Si un nombre ya se usa en
+ * los aportes, ese se respeta para no partir los datos. `yo` = cómo aparece el usuario actual en la lista.
+ */
+export async function personasDelHogar(): Promise<{ personas: string[]; mesInicio: string | null; yo: string }> {
+  const [{ data }, { data: aportes }, { data: sesion }] = await Promise.all([
+    supabase.from("usuarios").select("id, nombre, email, creado_en"),
     supabase.from("aportes_mes").select("usuario_nombre"),
+    supabase.auth.getUser(),
   ]);
-  const { data: sesion } = await supabase.auth.getUser();
-  const nombres = new Set<string>();
-  const actual = sesion.user?.user_metadata?.nombre ?? sesion.user?.email;
-  if (actual) nombres.add(actual);
+  const usuario = sesion.user;
+  const actual: string = usuario?.user_metadata?.nombre ?? usuario?.email ?? "";
+  // que cada usuario quede registrado en la tabla de usuarios (así el otro lo ve en su pantalla)
+  if (usuario && !(data ?? []).some((u: any) => u.id === usuario.id)) {
+    supabase.from("usuarios").insert({ id: usuario.id, nombre: actual, email: usuario.email }).then(() => undefined, () => undefined);
+  }
+
+  const lista: string[] = [];
+  const agregar = (n: string | null | undefined, preferido: boolean) => {
+    const nombre = (n ?? "").trim();
+    if (!nombre) return;
+    const i = lista.findIndex((x) => mismaPersona(x, nombre));
+    if (i === -1) lista.push(nombre);
+    else if (preferido) lista[i] = nombre;
+  };
+  // primero los nombres que ya tienen datos (aportes), luego los usuarios registrados
+  (aportes ?? []).forEach((a: any) => agregar(a.usuario_nombre, false));
   let mesInicio: string | null = null;
   (data ?? []).forEach((u: any) => {
-    const n = u.nombre || u.email;
-    if (n) nombres.add(n);
+    agregar(u.nombre || u.email, false);
     const m = u.creado_en ? String(u.creado_en).slice(0, 7) : null;
     if (m && (!mesInicio || m < mesInicio)) mesInicio = m;
   });
-  // personas agregadas a mano en Ingresos (no necesitan usuario en la app)
-  (aportes ?? []).forEach((a: any) => a.usuario_nombre && nombres.add(a.usuario_nombre));
-  return { personas: Array.from(nombres), mesInicio };
+  agregar(actual, false);
+  const yo = nombreCanonico(actual, lista);
+  // el usuario actual va primero
+  const personas = [yo, ...lista.filter((x) => x !== yo)].filter(Boolean);
+  return { personas, mesInicio, yo };
 }
 
 /**
