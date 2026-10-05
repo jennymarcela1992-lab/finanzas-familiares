@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert, Modal } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert, Modal, Switch } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useVehiculos, VehiculoConResumen, NOMBRES_DIAS, diasDelMes, rentabilidad, DiaVehiculo } from "../../hooks/useVehiculos";
 import { useGastos } from "../../hooks/useGastos";
+import { usePersonas } from "../../hooks/usePersonas";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
@@ -25,10 +26,10 @@ const COLOR_DIA: Record<string, { bg: string; fg: string }> = {
   futuro: { bg: "#FFFFFF", fg: "#B9C2C0" },
 };
 
-const FORM_VACIO = { nombre: "", placa: "", arrendatario: "", cuota: "", descanso: 0 };
+const FORM_VACIO = { nombre: "", placa: "", arrendatario: "", cuota: "", descanso: 0, generaIngresos: true, valorComercial: "" };
 
 export default function VehiculoScreen() {
-  const { vehiculos, cargando, error, crearVehiculo, editarVehiculo, registrarDia, registrarVarios, borrarDia, agregarPicoPlaca, borrarPicoPlaca, recargar } = useVehiculos();
+  const { vehiculos, cargando, error, crearVehiculo, editarVehiculo, eliminarVehiculo, registrarDia, registrarVarios, borrarDia, agregarPicoPlaca, borrarPicoPlaca, recargar } = useVehiculos();
   const { agregarGasto } = useGastos();
   const [mes, setMes] = useState(hoyISO().slice(0, 7));
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -50,6 +51,8 @@ export default function VehiculoScreen() {
   const [gItem, setGItem] = useState("");
   const [gValor, setGValor] = useState("");
   const [gFecha, setGFecha] = useState(hoyISO());
+  const [gPaga, setGPaga] = useState("");
+  const { personas, yo } = usePersonas();
 
   const esMesActual = mes === hoyISO().slice(0, 7);
 
@@ -60,15 +63,32 @@ export default function VehiculoScreen() {
     setMostrarForm(true);
   }
   function abrirEdicion(v: VehiculoConResumen) {
-    setForm({ nombre: v.nombre, placa: v.placa ?? "", arrendatario: v.arrendatario ?? "", cuota: Math.round(Number(v.cuota_diaria)).toLocaleString("es-CO"), descanso: Number(v.dia_descanso) });
+    setForm({
+      nombre: v.nombre,
+      placa: v.placa ?? "",
+      arrendatario: v.arrendatario ?? "",
+      cuota: v.cuota_diaria ? Math.round(Number(v.cuota_diaria)).toLocaleString("es-CO") : "",
+      descanso: Number(v.dia_descanso ?? 0),
+      generaIngresos: v.genera_ingresos,
+      valorComercial: v.valor_comercial ? Math.round(Number(v.valor_comercial)).toLocaleString("es-CO") : "",
+    });
     setEditandoId(v.id);
     setMostrarForm(true);
   }
 
   async function guardarVehiculo() {
     const cuota = aNumero(form.cuota);
-    if (!form.nombre.trim() || !(cuota > 0)) return Alert.alert("Faltan datos", "Escribe el nombre y la cuota diaria.");
-    const datos = { nombre: form.nombre.trim(), placa: form.placa.trim() || undefined, arrendatario: form.arrendatario.trim() || undefined, cuotaDiaria: cuota, diaDescanso: form.descanso };
+    if (!form.nombre.trim()) return Alert.alert("Falta el nombre", "Escribe el nombre del vehículo.");
+    if (form.generaIngresos && !(cuota > 0)) return Alert.alert("Falta la cuota", "Escribe la cuota diaria de la renta.");
+    const datos = {
+      nombre: form.nombre.trim(),
+      placa: form.placa.trim() || undefined,
+      arrendatario: form.arrendatario.trim() || undefined,
+      cuotaDiaria: cuota || 0,
+      diaDescanso: form.descanso,
+      generaIngresos: form.generaIngresos,
+      valorComercial: aNumero(form.valorComercial) || null,
+    };
     setGuardando(true);
     try {
       if (editandoId) await editarVehiculo(editandoId, datos);
@@ -130,7 +150,7 @@ export default function VehiculoScreen() {
     if (!gItem.trim() || !(valor > 0)) return Alert.alert("Faltan datos", "Escribe el concepto y el valor del gasto.");
     setGuardando(true);
     try {
-      await agregarGasto({ fecha: gFecha, item: gItem.trim(), valor, rubro: "Vehículo", esCompartido: true, vehiculoId: v.id, moneda: "COP", valorCop: valor });
+      await agregarGasto({ fecha: gFecha, item: gItem.trim(), valor, rubro: "Vehículo", esCompartido: true, vehiculoId: v.id, moneda: "COP", valorCop: valor, pagadoPor: gPaga || yo });
       await recargar();
       setGItem("");
       setGValor("");
@@ -142,7 +162,84 @@ export default function VehiculoScreen() {
     }
   }
 
+  function panelGasto(v: VehiculoConResumen) {
+    if (gastoEn !== v.id) return null;
+    return (
+      <View style={styles.panel}>
+        <Text style={typography.h3}>Gasto del vehículo</Text>
+        <TextInput style={styles.input} placeholder="Concepto (ej. cambio de aceite, SOAT)" placeholderTextColor={colors.textMuted} value={gItem} onChangeText={setGItem} />
+        <TextInput style={styles.input} placeholder="Valor" placeholderTextColor={colors.textMuted} value={gValor} onChangeText={setGValor} keyboardType="numeric" />
+        <FechaInput value={gFecha} onChange={setGFecha} max={hoyISO()} />
+        <Text style={styles.label}>¿Quién pagó?</Text>
+        <View style={styles.chips}>
+          {personas.map((n) => (
+            <TouchableOpacity key={n} onPress={() => setGPaga(n)} style={[styles.chip, (gPaga || yo) === n && styles.chipActivo]}>
+              <Text style={[styles.chipTxt, (gPaga || yo) === n && styles.chipTxtActivo]}>{n}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={styles.ayuda}>Queda también en Gastos (rubro Vehículo).</Text>
+        <PrimaryButton title="Guardar gasto" onPress={() => guardarGasto(v)} loading={guardando} />
+      </View>
+    );
+  }
+
+  function confirmarEliminar(v: VehiculoConResumen) {
+    Alert.alert("Eliminar vehículo", `¿Eliminar ${v.nombre} y sus pagos diarios? Los gastos y créditos no se borran, solo se desvinculan.`, [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Eliminar", style: "destructive", onPress: () => eliminarVehiculo(v.id).catch((e) => Alert.alert("Error", e.message)) },
+    ]);
+  }
+
+  /** Vehículo de uso propio: solo valor (patrimonio), gastos y su parte de créditos. */
+  function renderUsoPropio(v: VehiculoConResumen) {
+    const rMes = rentabilidad(v, `${mes}-01`, `${mes}-31`);
+    const r12 = rentabilidad(v, sumarMeses(hoyISO(), -12), hoyISO());
+    return (
+      <Card key={v.id}>
+        <View style={styles.rowStart}>
+          <View style={styles.iconoCircle}>
+            <Ionicons name="car-sport" size={17} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={typography.h3}>
+              {v.nombre}
+              {v.placa ? ` · ${v.placa}` : ""}
+            </Text>
+            <Text style={typography.caption}>Uso propio · suma al patrimonio{v.valor_comercial ? ` · vale ${pesos(Number(v.valor_comercial))}` : ""}</Text>
+          </View>
+          <TouchableOpacity onPress={() => abrirEdicion(v)} style={{ padding: 4 }}>
+            <Ionicons name="create-outline" size={18} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => confirmarEliminar(v)} style={{ padding: 4 }}>
+            <Ionicons name="trash-outline" size={18} color={colors.danger} />
+          </TouchableOpacity>
+        </View>
+        {v.creditos.map((c) => (
+          <Text key={c.deuda_id} style={styles.listaTxt}>
+            Crédito {c.nombre}: le corresponde el {Math.round(c.porcentaje * 100) / 100}%
+          </Text>
+        ))}
+        <View style={styles.resumen}>
+          <Mini t={`Gastos ${MESES[Number(mes.slice(5, 7)) - 1]}`} v={pesos(rMes.gastos)} />
+          <Mini t="Cuotas (su parte)" v={pesos(rMes.cuotas)} />
+          <Mini t="Costo 12 meses" v={pesos(r12.gastos + r12.cuotas)} color={colors.primary} />
+        </View>
+        <View style={styles.acciones}>
+          <Accion icono="construct" texto="Gasto del vehículo" onPress={() => setGastoEn(gastoEn === v.id ? null : v.id)} />
+        </View>
+        {panelGasto(v)}
+        {v.gastos.slice(0, 5).map((g) => (
+          <Text key={g.id} style={styles.listaTxt}>
+            {formatoFecha(g.fecha)} · {g.item} · {pesos(g.valor)}
+          </Text>
+        ))}
+      </Card>
+    );
+  }
+
   function renderVehiculo(v: VehiculoConResumen) {
+    if (!v.genera_ingresos) return renderUsoPropio(v);
     const dias = diasDelMes(v, mes);
     const esperado = dias.reduce((s, d) => s + d.esperado, 0);
     const recibido = dias.reduce((s, d) => s + d.recibido, 0);
@@ -173,8 +270,11 @@ export default function VehiculoScreen() {
               {v.picoPlacaHoy !== null ? ` · pico y placa ${NOMBRES_DIAS[v.picoPlacaHoy].toLowerCase()}` : ""}
             </Text>
           </View>
-          <TouchableOpacity onPress={() => abrirEdicion(v)}>
+          <TouchableOpacity onPress={() => abrirEdicion(v)} style={{ padding: 4 }}>
             <Ionicons name="create-outline" size={18} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => confirmarEliminar(v)} style={{ padding: 4 }}>
+            <Ionicons name="trash-outline" size={18} color={colors.danger} />
           </TouchableOpacity>
         </View>
 
@@ -273,16 +373,7 @@ export default function VehiculoScreen() {
           </View>
         )}
 
-        {gastoEn === v.id && (
-          <View style={styles.panel}>
-            <Text style={typography.h3}>Gasto del carro</Text>
-            <TextInput style={styles.input} placeholder="Concepto (ej. cambio de aceite, SOAT)" placeholderTextColor={colors.textMuted} value={gItem} onChangeText={setGItem} />
-            <TextInput style={styles.input} placeholder="Valor" placeholderTextColor={colors.textMuted} value={gValor} onChangeText={setGValor} keyboardType="numeric" />
-            <FechaInput value={gFecha} onChange={setGFecha} max={hoyISO()} />
-            <Text style={styles.ayuda}>Queda también en Gastos (rubro Vehículo).</Text>
-            <PrimaryButton title="Guardar gasto" onPress={() => guardarGasto(v)} loading={guardando} />
-          </View>
-        )}
+        {panelGasto(v)}
 
         <View style={styles.panel}>
           <Text style={typography.h3}>Rentabilidad</Text>
@@ -294,7 +385,7 @@ export default function VehiculoScreen() {
             </View>
             <FilaR t="Ingresos (renta)" a={rMes.ingresos} b={rTotal.ingresos} />
             <FilaR t="Gastos del carro" a={-rMes.gastos} b={-rTotal.gastos} />
-            {(rMes.cuotas > 0 || rTotal.cuotas > 0) && <FilaR t="Cuotas del crédito" a={-rMes.cuotas} b={-rTotal.cuotas} />}
+            {(rMes.cuotas > 0 || rTotal.cuotas > 0) && <FilaR t="Cuotas del crédito (su %)" a={-rMes.cuotas} b={-rTotal.cuotas} />}
             <FilaR t="Ganancia neta" a={rMes.neto} b={rTotal.neto} fuerte />
             <View style={styles.tablaFila}>
               <Text style={[styles.tablaCelda, { flex: 1.4 }]}>Margen</Text>
@@ -315,7 +406,7 @@ export default function VehiculoScreen() {
 
   return (
     <View style={styles.container}>
-      <ScreenHeader title="Vehículo rentado" subtitle="Pagos diarios y rentabilidad" actionLabel="Nuevo" onAction={abrirNuevo} actionActive={mostrarForm && !editandoId} />
+      <ScreenHeader title="Vehículos" subtitle="Rentados y de uso propio" actionLabel="Nuevo" onAction={abrirNuevo} actionActive={mostrarForm && !editandoId} />
 
       {mostrarForm ? (
         <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }}>
@@ -323,17 +414,27 @@ export default function VehiculoScreen() {
             <Text style={[typography.h3, { marginBottom: spacing.sm }]}>{editandoId ? "Editar vehículo" : "Nuevo vehículo"}</Text>
             <TextInput style={styles.input} placeholder="Nombre del vehículo" placeholderTextColor={colors.textMuted} value={form.nombre} onChangeText={(t) => setForm({ ...form, nombre: t })} />
             <TextInput style={styles.input} placeholder="Placa" placeholderTextColor={colors.textMuted} value={form.placa} onChangeText={(t) => setForm({ ...form, placa: t })} />
-            <TextInput style={styles.input} placeholder="Conductor" placeholderTextColor={colors.textMuted} value={form.arrendatario} onChangeText={(t) => setForm({ ...form, arrendatario: t })} />
-            <TextInput style={styles.input} placeholder="Cuota diaria" placeholderTextColor={colors.textMuted} value={form.cuota} onChangeText={(t) => setForm({ ...form, cuota: t })} keyboardType="numeric" />
-            <Text style={styles.label}>Día de descanso (no se cobra)</Text>
-            <View style={styles.chips}>
-              {NOMBRES_DIAS.map((n, i) => (
-                <TouchableOpacity key={n} onPress={() => setForm({ ...form, descanso: i })} style={[styles.chip, form.descanso === i && styles.chipActivo]}>
-                  <Text style={[styles.chipTxt, form.descanso === i && styles.chipTxtActivo]}>{n}</Text>
-                </TouchableOpacity>
-              ))}
+            <Text style={styles.label}>Valor comercial (suma al patrimonio)</Text>
+            <TextInput style={styles.input} placeholder="Ej. 60.000.000" placeholderTextColor={colors.textMuted} value={form.valorComercial} onChangeText={(t) => setForm({ ...form, valorComercial: t })} keyboardType="numeric" />
+            <View style={styles.switchFila}>
+              <Text style={[typography.body, { flex: 1 }]}>Se renta (genera ingresos diarios). Apágalo si es de uso propio: solo suma a patrimonio y gastos.</Text>
+              <Switch value={form.generaIngresos} onValueChange={(b) => setForm({ ...form, generaIngresos: b })} trackColor={{ true: colors.primary }} />
             </View>
-            <Text style={styles.ayuda}>El día de pico y placa se configura en el vehículo, con la fecha desde la que aplica.</Text>
+            {form.generaIngresos && (
+              <>
+                <TextInput style={styles.input} placeholder="Conductor" placeholderTextColor={colors.textMuted} value={form.arrendatario} onChangeText={(t) => setForm({ ...form, arrendatario: t })} />
+                <TextInput style={styles.input} placeholder="Cuota diaria" placeholderTextColor={colors.textMuted} value={form.cuota} onChangeText={(t) => setForm({ ...form, cuota: t })} keyboardType="numeric" />
+                <Text style={styles.label}>Día de descanso (no se cobra)</Text>
+                <View style={styles.chips}>
+                  {NOMBRES_DIAS.map((n, i) => (
+                    <TouchableOpacity key={n} onPress={() => setForm({ ...form, descanso: i })} style={[styles.chip, form.descanso === i && styles.chipActivo]}>
+                      <Text style={[styles.chipTxt, form.descanso === i && styles.chipTxtActivo]}>{n}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.ayuda}>El día de pico y placa se configura en el vehículo, con la fecha desde la que aplica.</Text>
+              </>
+            )}
             <PrimaryButton title={editandoId ? "Guardar cambios" : "Crear vehículo"} onPress={guardarVehiculo} loading={guardando} />
             <PrimaryButton title="Cancelar" variant="outline" onPress={() => setMostrarForm(false)} style={{ marginTop: spacing.sm }} />
           </Card>
@@ -466,6 +567,7 @@ const styles = StyleSheet.create({
   miniV: { fontSize: 13, fontWeight: "800", color: colors.textPrimary },
   semana: { flexDirection: "row" },
   semanaTxt: { width: `${100 / 7}%`, textAlign: "center", fontSize: 10, color: colors.textMuted, fontWeight: "700", paddingVertical: 4 },
+  switchFila: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: spacing.sm },
   calendario: { flexDirection: "row", flexWrap: "wrap" },
   celda: { width: `${100 / 7}%`, padding: 2 },
   celdaIn: { borderRadius: 6, paddingVertical: 4, alignItems: "center", borderWidth: 1, borderColor: "transparent", minHeight: 40 },

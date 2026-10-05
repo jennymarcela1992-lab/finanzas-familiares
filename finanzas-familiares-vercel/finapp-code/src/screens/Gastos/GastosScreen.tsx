@@ -107,6 +107,7 @@ export default function GastosScreen() {
   function abrirEdicion(g: GastoRow) {
     limpiarFormulario();
     setEditando(g);
+    setPagaAuto(g.usuario_pago_nombre ?? "");
     setItem(g.item);
     setValor(Number(g.valor).toLocaleString("es-CO"));
     setMoneda(g.moneda || "COP");
@@ -169,6 +170,7 @@ export default function GastosScreen() {
         valorCop: convertirACOP(aNumero(valor), moneda),
         propiedadId: asociado?.tipo === "propiedad" ? asociado.id : null,
         vehiculoId: asociado?.tipo === "vehiculo" ? asociado.id : null,
+        pagadoPor: pagaAuto || yo,
       };
       if (!editando && esAutomatico) {
         const hasta =
@@ -403,6 +405,15 @@ export default function GastosScreen() {
             <Text style={styles.conversionTexto}>≈ ${convertirACOP(aNumero(valor) || 0, moneda).toLocaleString("es-CO")} COP</Text>
           )}
 
+          <Text style={styles.label}>{esAutomatico ? "¿Quién lo paga cada mes?" : "¿Quién pagó?"}</Text>
+          <View style={styles.chipsRow}>
+            {personas.map((n) => (
+              <TouchableOpacity key={n} style={[styles.chip, (pagaAuto || yo) === n && styles.chipActivo]} onPress={() => setPagaAuto(n)}>
+                <Text style={[styles.chipText, (pagaAuto || yo) === n && styles.chipTextActivo]}>{n}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <Text style={styles.label}>{esAutomatico ? "Primera fecha (se repite este día cada mes)" : "Fecha del gasto"}</Text>
           <FechaInput value={fecha} onChange={setFecha} max={esAutomatico ? undefined : hoyISO()} />
 
@@ -414,14 +425,6 @@ export default function GastosScreen() {
           )}
           {!editando && esAutomatico && (
             <View style={styles.creditoBox}>
-              <Text style={styles.label}>¿Quién lo paga?</Text>
-              <View style={styles.chipsRow}>
-                {personas.map((n) => (
-                  <TouchableOpacity key={n} style={[styles.chip, (pagaAuto || yo) === n && styles.chipActivo]} onPress={() => setPagaAuto(n)}>
-                    <Text style={[styles.chipText, (pagaAuto || yo) === n && styles.chipTextActivo]}>{n}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
               <Text style={styles.label}>¿Por cuánto tiempo?</Text>
               <View style={styles.chipsRow}>
                 {(

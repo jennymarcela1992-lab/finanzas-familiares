@@ -3,7 +3,7 @@ import { supabase } from "../config/supabase";
 import { asegurarAutomaticos } from "../utils/automaticos";
 import { hoyISO, sumarMeses } from "../utils/amortizacion";
 import { personasDelHogar, aportesDelMes, esDelHogar, AportePersona } from "../utils/aportes";
-import { arriendoVigente, fechaPagoArriendo } from "../utils/arriendo";
+import { arriendoDePropiedad, fechaPagoArriendo } from "../utils/arriendo";
 
 export interface MesBalance {
   mes: string; // AAAA-MM
@@ -54,6 +54,9 @@ export interface DatosDashboard {
   deudas: DeudaResumen[];
   totalAhorrado: number;
   totalDeuda: number;
+  totalPropiedades: number; // valor comercial de las propiedades
+  totalVehiculos: number; // valor comercial de los vehículos
+  activos: { nombre: string; tipo: "propiedad" | "vehiculo"; valor: number; usoPropio: boolean }[];
 }
 
 const mesDe = (fecha: string) => String(fecha).slice(0, 7);
@@ -90,7 +93,7 @@ export function useDashboard(mes: string) {
     const [rG, rArr, rVeh, rPV, rCu, rDeu, rAb, rMet, rApo, rProp, rPag] = await Promise.all([
       supabase.from("gastos").select("id, fecha, valor, valor_cop, rubro, borrado, deuda_id").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("arriendos_recibidos").select("propiedad_id, mes, monto").gte("mes", meses[0]).lte("mes", mes),
-      supabase.from("vehiculos").select("id, nombre, cuota_diaria"),
+      supabase.from("vehiculos").select("*"),
       supabase.from("pagos_vehiculo").select("vehiculo_id, fecha, estado, monto").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("cuotas_deuda").select("deuda_id, numero_cuota, cuota_total, valor_pagado, capital, abono_extra, fecha_vencimiento, estado"),
       supabase.from("deudas").select("id, nombre, valor_inicial, entidad_pago"),
@@ -252,17 +255,21 @@ export function useDashboard(mes: string) {
 
     const mesActual = hoy.slice(0, 7);
     // Arriendos por cobrar: valor vigente (con IPC) y fecha de pago pactada
-    const [{ data: arriendosHoy }, { data: ipcData }] = await Promise.all([
+    const [{ data: arriendosHoy }, { data: ipcData }, rK] = await Promise.all([
       supabase.from("arriendos_recibidos").select("propiedad_id, monto").eq("mes", mesActual),
       supabase.from("ipc_anual").select("*"),
+      supabase.from("contratos_arriendo").select("*"),
     ]);
+    const contratosFilas = rK.error ? null : ((rK.data ?? []) as any[]);
     const ipc: Record<number, number> = {};
     (ipcData ?? []).forEach((r: any) => (ipc[Number(r.anio)] = Number(r.variacion)));
     (rProp.error ? [] : rProp.data ?? []).forEach((p: any) => {
-      const vigente = arriendoVigente(p, ipc, hoy).valor;
+      const info = arriendoDePropiedad(p, contratosFilas, ipc, hoy);
+      if (!info.contrato || !info.valor || info.contrato.fecha_inicio > hoy) return; // uso propio o desocupada
+      const vigente = info.valor.valor;
       const recibido = (arriendosHoy ?? []).filter((a: any) => a.propiedad_id === p.id).reduce((s: number, a: any) => s + Number(a.monto), 0);
       if (recibido >= vigente - 1) return;
-      const fechaPago = fechaPagoArriendo(mesActual, p.dia_pago_arriendo);
+      const fechaPago = fechaPagoArriendo(mesActual, info.contrato.dia_pago);
       proximos.push({
         tipo: "arriendo",
         titulo: p.nombre,
@@ -272,6 +279,11 @@ export function useDashboard(mes: string) {
         vencido: fechaPago < hoy,
       });
     });
+
+    const activos: DatosDashboard["activos"] = [
+      ...(rProp.error ? [] : rProp.data ?? []).map((p: any) => ({ nombre: p.nombre, tipo: "propiedad" as const, valor: Number(p.valor_comercial) || 0, usoPropio: p.genera_ingresos === false })),
+      ...(rVeh.error ? [] : rVeh.data ?? []).map((v: any) => ({ nombre: v.nombre, tipo: "vehiculo" as const, valor: Number(v.valor_comercial) || 0, usoPropio: v.genera_ingresos === false })),
+    ].filter((a) => a.valor > 0);
 
     proximos.sort((a, b) => Number(b.vencido) - Number(a.vencido) || (a.fecha ?? "9999").localeCompare(b.fecha ?? "9999"));
 
@@ -287,6 +299,9 @@ export function useDashboard(mes: string) {
       deudas,
       totalAhorrado: metas.reduce((s, m) => s + m.ahorrado, 0),
       totalDeuda: deudas.reduce((s, d) => s + d.saldo, 0),
+      totalPropiedades: activos.filter((a) => a.tipo === "propiedad").reduce((s, a) => s + a.valor, 0),
+      totalVehiculos: activos.filter((a) => a.tipo === "vehiculo").reduce((s, a) => s + a.valor, 0),
+      activos,
     });
     setError(null);
     setCargando(false);

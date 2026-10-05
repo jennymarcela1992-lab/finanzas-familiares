@@ -45,6 +45,7 @@ export interface NuevoGasto {
   deudaId?: string; // si el gasto es el pago de un crédito
   propiedadId?: string | null;
   vehiculoId?: string | null;
+  pagadoPor?: string; // quién pagó (por defecto, el usuario que lo registra)
 }
 
 const BUCKET = "comprobantes";
@@ -157,15 +158,16 @@ export function useGastos() {
       comprobanteUrl = await subirComprobante(nuevo.comprobanteUri, usuario.id);
     }
 
-    const pagadoPor = usuario?.user_metadata?.nombre ?? usuario?.email ?? "Alguien";
+    const yoNombre = usuario?.user_metadata?.nombre ?? usuario?.email ?? "Alguien";
+    const pagadoPor = nuevo.pagadoPor?.trim() || yoNombre;
     const { data: creado, error: err } = await supabase.from("gastos").insert({
       fecha: nuevo.fecha,
       item: nuevo.item,
       valor: nuevo.valor,
       moneda: nuevo.moneda ?? "COP",
       valor_cop: nuevo.valorCop ?? nuevo.valor,
-      usuario_pago_id: usuario?.id,
-      usuario_pago_nombre: usuario?.user_metadata?.nombre ?? usuario?.email,
+      usuario_pago_id: pagadoPor === yoNombre ? usuario?.id : null,
+      usuario_pago_nombre: pagadoPor,
       rubro: nuevo.rubro,
       es_compartido: nuevo.esCompartido,
       metodo_pago: nuevo.metodoPago ?? null,
@@ -234,6 +236,12 @@ export function useGastos() {
         comprobante_url: comprobanteUrl,
         ...(cambios.propiedadId !== undefined ? { propiedad_id: cambios.propiedadId } : {}),
         ...(cambios.vehiculoId !== undefined ? { vehiculo_id: cambios.vehiculoId } : {}),
+        ...(cambios.pagadoPor
+          ? {
+              usuario_pago_nombre: cambios.pagadoPor,
+              usuario_pago_id: cambios.pagadoPor === (usuario?.user_metadata?.nombre ?? usuario?.email) ? usuario?.id ?? null : null,
+            }
+          : {}),
       })
       .eq("id", id);
     if (err) throw err;
@@ -244,7 +252,10 @@ export function useGastos() {
     }
 
     if (actual.deuda_id) {
-      const { error: errPago } = await supabase.from("pagos_deuda").update({ valor: Math.round(valorCop), fecha: cambios.fecha }).eq("gasto_id", id);
+      const { error: errPago } = await supabase
+        .from("pagos_deuda")
+        .update({ valor: Math.round(valorCop), fecha: cambios.fecha, ...(cambios.pagadoPor ? { pagado_por: cambios.pagadoPor } : {}) })
+        .eq("gasto_id", id);
       if (errPago) throw new Error(`Se guardó el gasto, pero no se pudo actualizar el pago del crédito: ${errPago.message}`);
       await reaplicarPagos(actual.deuda_id);
     }

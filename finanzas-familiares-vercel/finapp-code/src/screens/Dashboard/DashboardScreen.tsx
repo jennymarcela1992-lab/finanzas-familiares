@@ -163,7 +163,7 @@ export default function DashboardScreen() {
   const quedo = actual.balance;
   const totalRubros = datos.rubros.reduce((s, r) => s + r.valor, 0);
   const maxRubro = Math.max(1, ...datos.rubros.map((r) => r.valor));
-  const neto = datos.totalAhorrado - datos.totalDeuda;
+  const neto = datos.totalAhorrado + datos.totalPropiedades + datos.totalVehiculos - datos.totalDeuda;
 
   return (
     <ScrollView
@@ -286,10 +286,17 @@ export default function DashboardScreen() {
         <Text style={typography.h3}>Patrimonio</Text>
         <View style={styles.tiles}>
           <Tile icono="wallet" titulo="Ahorrado" valor={datos.totalAhorrado} />
-          <Tile icono="card" titulo="Debes" valor={datos.totalDeuda} />
-          <Tile icono="analytics" titulo="Neto" valor={neto} />
+          <Tile icono="business" titulo="Propiedades" valor={datos.totalPropiedades} />
+          <Tile icono="car" titulo="Vehículos" valor={datos.totalVehiculos} />
         </View>
-        <Text style={styles.ayuda}>Neto = ahorros − saldo de créditos. No incluye el valor de propiedades ni vehículos.</Text>
+        <View style={styles.tiles}>
+          <Tile icono="card" titulo="Debes" valor={datos.totalDeuda} />
+          <Tile icono="analytics" titulo="Patrimonio neto" valor={neto} />
+        </View>
+        <Text style={styles.ayuda}>
+          Patrimonio neto = ahorros + valor comercial de propiedades y vehículos (incluye los de uso propio) − saldo de créditos.
+          {datos.activos.length === 0 ? " Escribe el valor comercial en cada propiedad o vehículo para sumarlo." : ""}
+        </Text>
 
         {datos.metas.length > 0 && (
           <View style={{ marginTop: spacing.md }}>

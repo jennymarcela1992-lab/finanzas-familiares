@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Alert, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAhorros, MetaAhorro } from "../../hooks/useAhorros";
+import { usePersonas } from "../../hooks/usePersonas";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import ProgressBar from "../../components/ProgressBar";
@@ -19,6 +20,8 @@ export default function AhorrosScreen() {
   const [metaSeleccionada, setMetaSeleccionada] = useState<MetaAhorro | null>(null);
   const [montoAporte, setMontoAporte] = useState("");
   const [notaAporte, setNotaAporte] = useState("");
+  const [quienAporta, setQuienAporta] = useState("");
+  const { personas, yo } = usePersonas();
 
   async function manejarCrearMeta() {
     if (!nombreMeta.trim() || !montoObjetivo.trim()) {
@@ -42,7 +45,7 @@ export default function AhorrosScreen() {
     if (!metaSeleccionada || !montoAporte.trim()) return;
     setGuardando(true);
     try {
-      await agregarAporte(metaSeleccionada.id, aNumero(montoAporte), notaAporte.trim() || undefined);
+      await agregarAporte(metaSeleccionada.id, aNumero(montoAporte), notaAporte.trim() || undefined, quienAporta || yo);
       setMontoAporte("");
       setNotaAporte("");
       setMetaSeleccionada(null);
@@ -103,6 +106,14 @@ export default function AhorrosScreen() {
           <View style={styles.modalCaja}>
             <Text style={typography.h2}>Aportar a "{metaSeleccionada?.nombre}"</Text>
             <TextInput style={styles.input} placeholder="Monto" placeholderTextColor={colors.textMuted} value={montoAporte} onChangeText={setMontoAporte} keyboardType="numeric" />
+            <Text style={styles.label}>¿Quién aportó?</Text>
+            <View style={styles.chips}>
+              {personas.map((n) => (
+                <TouchableOpacity key={n} onPress={() => setQuienAporta(n)} style={[styles.chip, (quienAporta || yo) === n && styles.chipActivo]}>
+                  <Text style={[styles.chipTxt, (quienAporta || yo) === n && styles.chipTxtActivo]}>{n}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             <TextInput style={styles.input} placeholder="Nota (ej. Enviado a Nu)" placeholderTextColor={colors.textMuted} value={notaAporte} onChangeText={setNotaAporte} />
             <PrimaryButton title="Guardar aporte" onPress={manejarAgregarAporte} loading={guardando} />
             <TouchableOpacity onPress={() => setMetaSeleccionada(null)} style={{ marginTop: spacing.md }}>
@@ -118,6 +129,12 @@ export default function AhorrosScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   input: { backgroundColor: colors.background, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, marginBottom: spacing.sm, fontSize: 15, color: colors.textPrimary },
+  label: { fontSize: 12, fontWeight: "700", color: colors.textSecondary, marginBottom: 4, marginTop: 4 },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: spacing.sm },
+  chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.primary },
+  chipActivo: { backgroundColor: colors.primary },
+  chipTxt: { fontSize: 12, fontWeight: "600", color: colors.primary },
+  chipTxtActivo: { color: colors.white },
   rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   iconoCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
   pctText: { ...typography.h3, color: colors.primary },

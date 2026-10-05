@@ -75,15 +75,17 @@ export function useAhorros() {
     await cargar();
   }
 
-  async function agregarAporte(metaId: string, monto: number, nota?: string) {
+  async function agregarAporte(metaId: string, monto: number, nota?: string, persona?: string) {
     const { data: sesion } = await supabase.auth.getUser();
     const usuario = sesion.user;
+    const yo = usuario?.user_metadata?.nombre ?? usuario?.email;
+    const quien = persona?.trim() || yo;
     const { error: err } = await supabase.from("aportes_ahorro").insert({
       meta_id: metaId,
       monto,
       nota: nota || null,
-      usuario_id: usuario?.id,
-      usuario_nombre: usuario?.user_metadata?.nombre ?? usuario?.email,
+      usuario_id: quien === yo ? usuario?.id : null,
+      usuario_nombre: quien,
     });
     if (err) throw err;
     await cargar();

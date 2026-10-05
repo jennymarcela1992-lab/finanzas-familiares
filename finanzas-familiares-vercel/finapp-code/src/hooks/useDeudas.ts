@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
+import { cargarVinculos, guardarVinculos, VinculoActivo } from "../utils/deudaActivos";
 import { TipoTasa, Frecuencia, PeriodoAbono, tasaPeriodo, abonoVigenteEn, generarCuotas, sumarMeses, hoyISO, fechaCuota, proyectarCuotas, EventoCredito } from "../utils/amortizacion";
 import { asegurarAutomaticos } from "../utils/automaticos";
 import { PagoDeudaRow, reaplicarPagos, registrarPagoDeuda, restanteDeCuota, nombreUsuarioActual } from "../utils/pagosDeuda";
@@ -81,6 +82,7 @@ export interface DeudaConCuotas extends DeudaRow {
   interesesPendientes: number;
   iMensual: number; // tasa por periodo de pago (mensual o quincenal)
   primerPago: string;
+  vinculos: VinculoActivo[]; // propiedades/vehículos y el % del crédito que les corresponde
 }
 
 export interface DatosDeuda {
@@ -99,6 +101,7 @@ export interface DatosDeuda {
   vehiculoId?: string | null;
   frecuencia?: Frecuencia;
   pagoAutomaticoPor?: string | null;
+  vinculos?: { tipo: "propiedad" | "vehiculo"; activoId: string; porcentaje: number }[];
 }
 
 async function nombreUsuario(): Promise<string> {
@@ -148,6 +151,7 @@ export function useDeudas() {
       supabase.from("desembolsos_deuda").select("*").order("fecha", { ascending: true }),
       supabase.from("abonos_mensuales_deuda").select("*"),
     ]);
+    const vinculosTodos = await cargarVinculos();
     const err = rD.error ?? rC.error;
     if (err) {
       setError(err.message);
@@ -177,6 +181,7 @@ export function useDeudas() {
         abonoVigente: abonoVigenteEn(periodosDe(d, periodosData), pendientes[0]?.fecha_vencimiento ?? hoyISO()),
         montoTotal,
         pagos: pagosData.filter((p) => p.deuda_id === d.id),
+        vinculos: vinculosTodos.filter((v) => v.deuda_id === d.id),
         restanteProxima: restanteDeCuota(pendientes[0]),
         cuotasPagadas: pagadas,
         porcentajePagado: montoTotal > 0 ? 1 - saldoActual / montoTotal : 0,
@@ -281,8 +286,8 @@ export function useDeudas() {
       alias_pago: datos.aliasPago ?? null,
       frecuencia: datos.frecuencia ?? "mensual",
       pago_automatico_por: datos.pagoAutomaticoPor || null,
-      propiedad_id: datos.propiedadId ?? null,
-      vehiculo_id: datos.vehiculoId ?? null,
+      propiedad_id: datos.vinculos ? datos.vinculos.find((v) => v.tipo === "propiedad")?.activoId ?? null : datos.propiedadId ?? null,
+      vehiculo_id: datos.vinculos ? datos.vinculos.find((v) => v.tipo === "vehiculo")?.activoId ?? null : datos.vehiculoId ?? null,
     };
   }
 
@@ -294,6 +299,7 @@ export function useDeudas() {
       .select()
       .single();
     chequear(errDeuda, "No se pudo crear la deuda");
+    if (datos.vinculos?.length) await guardarVinculos(creada.id, datos.vinculos);
 
     const hoy = hoyISO();
     const cuotas = generarCuotas({
@@ -337,6 +343,7 @@ export function useDeudas() {
   async function editarDeuda(id: string, datos: DatosDeuda) {
     const { error: err } = await supabase.from("deudas").update(filaDeuda(datos)).eq("id", id);
     chequear(err, "No se pudo guardar el cambio");
+    if (datos.vinculos) await guardarVinculos(id, datos.vinculos);
     await recalcularPendientes(id);
     await cargar();
   }

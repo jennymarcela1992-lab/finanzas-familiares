@@ -37,7 +37,7 @@ const FORM_VACIO = {
   entidad: "",
   cuenta: "",
   alias: "",
-  activo: "" as string, // id de la propiedad o vehículo asociado
+  vinculos: {} as Record<string, string>, // id de propiedad/vehículo -> % del crédito que le corresponde
   frecuencia: "mensual" as Frecuencia,
   automatico: "" as string, // persona desde cuya cuenta se debita la cuota ("" = no)
 };
@@ -122,7 +122,7 @@ export default function DeudasScreen() {
       entidad: d.entidad_pago ?? "",
       cuenta: d.numero_cuenta ?? "",
       alias: d.alias_pago ?? "",
-      activo: d.propiedad_id ?? d.vehiculo_id ?? "",
+      vinculos: Object.fromEntries(d.vinculos.map((v) => [v.activo_id, String(v.porcentaje).replace(".", ",")])),
       frecuencia: (d.frecuencia ?? "mensual") as Frecuencia,
       automatico: d.pago_automatico_por ?? "",
     });
@@ -136,6 +136,11 @@ export default function DeudasScreen() {
     const plazo = Math.round(aNumero(form.plazo));
     if (!form.nombre.trim() || !(valor > 0) || !(tasa >= 0) || !(plazo > 0)) {
       Alert.alert("Faltan datos", "Completa nombre, valor, tasa y plazo con números válidos.");
+      return;
+    }
+    const sumaPct = Object.values(form.vinculos).reduce((t, v) => t + (aNumero(v) || 0), 0);
+    if (sumaPct > 100.01) {
+      Alert.alert("Porcentajes", `Los porcentajes del crédito suman ${sumaPct}%. No pueden pasar de 100%.`);
       return;
     }
     if (!fechaOk) {
@@ -153,8 +158,10 @@ export default function DeudasScreen() {
       entidadPago: form.entidad.trim() || undefined,
       numeroCuenta: form.cuenta.trim() || undefined,
       aliasPago: form.alias.trim() || undefined,
-      propiedadId: activos.find((a) => a.id === form.activo && a.tipo === "propiedad")?.id ?? null,
-      vehiculoId: activos.find((a) => a.id === form.activo && a.tipo === "vehiculo")?.id ?? null,
+      vinculos: Object.entries(form.vinculos)
+        .map(([id, pct]) => ({ a: activos.find((x) => x.id === id), pct: aNumero(pct) }))
+        .filter((x) => x.a && x.pct > 0)
+        .map((x) => ({ tipo: x.a!.tipo, activoId: x.a!.id, porcentaje: x.pct })),
       frecuencia: form.frecuencia,
       pagoAutomaticoPor: form.automatico || null,
     };
@@ -295,20 +302,56 @@ export default function DeudasScreen() {
 
           {activos.length > 0 && (
             <>
-              <Text style={[styles.label, { marginTop: spacing.sm }]}>¿Está asociado a una propiedad o al carro?</Text>
+              <Text style={[styles.label, { marginTop: spacing.sm }]}>¿A qué propiedades o vehículos corresponde este crédito? (puedes elegir varios)</Text>
               <View style={styles.chips}>
-                <TouchableOpacity onPress={() => setForm((f) => ({ ...f, activo: "" }))} style={[styles.chip, !form.activo && styles.chipActivo]}>
-                  <Text style={[styles.chipTexto, !form.activo && styles.chipTextoActivo]}>No</Text>
-                </TouchableOpacity>
-                {activos.map((a) => (
-                  <TouchableOpacity key={a.id} onPress={() => setForm((f) => ({ ...f, activo: a.id }))} style={[styles.chip, form.activo === a.id && styles.chipActivo]}>
-                    <Text style={[styles.chipTexto, form.activo === a.id && styles.chipTextoActivo]}>
-                      {a.nombre} ({a.tipo === "propiedad" ? "propiedad" : "carro"})
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {activos.map((a) => {
+                  const sel = form.vinculos[a.id] !== undefined;
+                  return (
+                    <TouchableOpacity
+                      key={a.id}
+                      onPress={() =>
+                        setForm((f) => {
+                          const v = { ...f.vinculos };
+                          if (sel) delete v[a.id];
+                          else {
+                            const usado = Object.values(v).reduce((t, x) => t + (aNumero(x) || 0), 0);
+                            v[a.id] = String(Math.max(0, 100 - usado));
+                          }
+                          return { ...f, vinculos: v };
+                        })
+                      }
+                      style={[styles.chip, sel && styles.chipActivo]}
+                    >
+                      <Text style={[styles.chipTexto, sel && styles.chipTextoActivo]}>
+                        {a.nombre} ({a.tipo === "propiedad" ? "propiedad" : "vehículo"})
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
-              <Text style={styles.ayuda}>Las cuotas se restan del rendimiento de esa propiedad o del carro, y el arriendo puede pagarlas directamente.</Text>
+              {Object.keys(form.vinculos).map((id) => (
+                <View key={id} style={[styles.rowStart, { marginBottom: 6 }]}>
+                  <Text style={[styles.ayuda, { flex: 1, marginBottom: 0 }]}>{activos.find((a) => a.id === id)?.nombre ?? "—"}</Text>
+                  <TextInput
+                    style={[styles.input, { width: 80, marginBottom: 0, textAlign: "right" }]}
+                    value={form.vinculos[id]}
+                    onChangeText={(t) => setForm((f) => ({ ...f, vinculos: { ...f.vinculos, [id]: t } }))}
+                    keyboardType="decimal-pad"
+                    placeholder="%"
+                  />
+                  <Text style={styles.ayuda}>%</Text>
+                </View>
+              ))}
+              {Object.keys(form.vinculos).length > 0 &&
+                (() => {
+                  const suma = Object.values(form.vinculos).reduce((t, v) => t + (aNumero(v) || 0), 0);
+                  return (
+                    <Text style={[styles.ayuda, suma > 100.01 && { color: colors.danger }]}>
+                      {suma > 100.01 ? `Suman ${suma}%: no puede pasar de 100%.` : suma < 99.99 ? `${Math.round((100 - suma) * 100) / 100}% del crédito no se asigna a ninguna (gasto del hogar).` : "100% asignado."}
+                    </Text>
+                  );
+                })()}
+              <Text style={styles.ayuda}>A cada propiedad o vehículo se le resta su porcentaje de las cuotas (rendimiento o costo), y el arriendo puede pagarlas directamente.</Text>
             </>
           )}
 
@@ -369,9 +412,9 @@ export default function DeudasScreen() {
               </View>
               <View style={{ flexShrink: 1 }}>
                 <Text style={typography.h3}>{d.nombre}</Text>
-                {(d.propiedad_id || d.vehiculo_id) && (
+                {d.vinculos.length > 0 && (
                   <Text style={typography.caption}>
-                    {d.propiedad_id ? "Propiedad" : "Carro"}: {activos.find((a) => a.id === (d.propiedad_id || d.vehiculo_id))?.nombre ?? ""}
+                    {d.vinculos.map((v) => `${activos.find((a) => a.id === v.activo_id)?.nombre ?? (v.tipo === "propiedad" ? "Propiedad" : "Vehículo")} ${Math.round(v.porcentaje * 100) / 100}%`).join(" · ")}
                   </Text>
                 )}
                 <View style={styles.badges}>

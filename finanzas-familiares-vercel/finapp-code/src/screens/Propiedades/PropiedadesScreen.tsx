@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Alert, Modal, ScrollView, Switch } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { usePropiedades, PropiedadConDetalle, DestinoArriendo, ArriendoRow } from "../../hooks/usePropiedades";
+import { usePropiedades, PropiedadConDetalle, DestinoArriendo, ArriendoRow, DatosContrato } from "../../hooks/usePropiedades";
+import { ContratoArriendo } from "../../utils/arriendo";
 import { usePersonas } from "../../hooks/usePersonas";
 import { useDeudas } from "../../hooks/useDeudas";
 import ScreenHeader from "../../components/ScreenHeader";
@@ -11,6 +12,7 @@ import FechaInput from "../../components/FechaInput";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
 import { formatoFecha, pesos, hoyISO, sumarMeses } from "../../utils/amortizacion";
+import { diasEntre } from "../../utils/arriendo";
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const nombreMes = (m: string) => `${MESES[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
@@ -18,16 +20,47 @@ const nombreMes = (m: string) => `${MESES[Number(m.slice(5, 7)) - 1]} ${m.slice(
 const FORM_VACIO = {
   nombre: "",
   direccion: "",
-  arrendatario: "",
-  valorInicial: "",
-  fechaInicio: "",
-  diaPago: "5",
   valorComercial: "",
-  aplicaIpc: true,
+  generaIngresos: true,
 };
 
+const CONTRATO_VACIO = {
+  arrendatario: "",
+  fechaInicio: hoyISO(),
+  canon: "",
+  diaPago: "5",
+  duracion: "12",
+  aplicaIpc: true,
+};
+type FormContrato = typeof CONTRATO_VACIO;
+
+/** Valida y convierte el formulario de contrato. Devuelve un mensaje si falta algo. */
+function leerContrato(c: FormContrato): DatosContrato | string {
+  const canon = aNumero(c.canon);
+  const dia = Math.round(aNumero(c.diaPago));
+  const dur = Math.round(aNumero(c.duracion));
+  if (!(canon > 0)) return "Escribe el valor del arriendo (canon) al iniciar el contrato.";
+  if (!(dia >= 1 && dia <= 31)) return "El día de pago debe estar entre 1 y 31.";
+  if (!(dur >= 1 && dur <= 120)) return "La duración del contrato debe estar entre 1 y 120 meses.";
+  return { arrendatario: c.arrendatario.trim() || undefined, fechaInicio: c.fechaInicio, canonInicial: canon, diaPago: dia, duracionMeses: dur, aplicaIpc: c.aplicaIpc };
+}
+
 export default function PropiedadesScreen() {
-  const { propiedades, ipc, cargando, error, crearPropiedad, editarPropiedad, registrarArriendoRecibido, eliminarArriendo, guardarIpc } = usePropiedades();
+  const {
+    propiedades,
+    ipc,
+    cargando,
+    error,
+    crearPropiedad,
+    editarPropiedad,
+    eliminarPropiedad,
+    guardarContrato,
+    terminarContrato,
+    eliminarContrato,
+    registrarArriendoRecibido,
+    eliminarArriendo,
+    guardarIpc,
+  } = usePropiedades();
   const { deudas, recargar: recargarDeudas } = useDeudas();
   const { personas } = usePersonas();
 
@@ -37,6 +70,14 @@ export default function PropiedadesScreen() {
   const [guardando, setGuardando] = useState(false);
   const [abierta, setAbierta] = useState<string | null>(null);
   const [verIpc, setVerIpc] = useState(false);
+  const [formContrato, setFormContrato] = useState<FormContrato>(CONTRATO_VACIO);
+  const cambiarC = (k: keyof FormContrato) => (v: any) => setFormContrato((f) => ({ ...f, [k]: v }));
+
+  // modal de contrato (nuevo o corregir) y de terminar contrato
+  const [contratoDe, setContratoDe] = useState<{ prop: PropiedadConDetalle; contrato: ContratoArriendo | null } | null>(null);
+  const [terminar, setTerminar] = useState<{ prop: PropiedadConDetalle; contrato: ContratoArriendo } | null>(null);
+  const [fechaFin, setFechaFin] = useState(hoyISO());
+  const [motivoFin, setMotivoFin] = useState("");
 
   // modal de arriendo
   const [prop, setProp] = useState<PropiedadConDetalle | null>(null);
@@ -51,6 +92,7 @@ export default function PropiedadesScreen() {
   function abrirNueva() {
     if (mostrarForm && !editandoId) return setMostrarForm(false);
     setForm(FORM_VACIO);
+    setFormContrato(CONTRATO_VACIO);
     setEditandoId(null);
     setMostrarForm(true);
   }
@@ -59,31 +101,27 @@ export default function PropiedadesScreen() {
     setForm({
       nombre: p.nombre,
       direccion: p.direccion ?? "",
-      arrendatario: p.arrendatario ?? "",
-      valorInicial: Math.round(Number(p.valor_arriendo_inicial ?? p.valor_arriendo)).toLocaleString("es-CO"),
-      fechaInicio: p.fecha_inicio_contrato ?? "",
-      diaPago: String(p.dia_pago_arriendo ?? 5),
       valorComercial: p.valor_comercial ? Math.round(Number(p.valor_comercial)).toLocaleString("es-CO") : "",
-      aplicaIpc: p.aplica_ipc !== false,
+      generaIngresos: p.genera_ingresos,
     });
     setEditandoId(p.id);
     setMostrarForm(true);
   }
 
   async function guardar() {
-    const valor = aNumero(form.valorInicial);
-    const dia = Math.round(aNumero(form.diaPago));
-    if (!form.nombre.trim() || !(valor > 0)) return Alert.alert("Faltan datos", "Escribe el nombre y el valor del arriendo.");
-    if (!(dia >= 1 && dia <= 31)) return Alert.alert("Día no válido", "El día de pago debe estar entre 1 y 31.");
+    if (!form.nombre.trim()) return Alert.alert("Falta el nombre", "Escribe el nombre de la propiedad.");
+    let contrato: DatosContrato | null = null;
+    if (!editandoId && form.generaIngresos && formContrato.canon.trim()) {
+      const c = leerContrato(formContrato);
+      if (typeof c === "string") return Alert.alert("Contrato", c);
+      contrato = c;
+    }
     const datos = {
       nombre: form.nombre.trim(),
       direccion: form.direccion.trim() || undefined,
-      arrendatario: form.arrendatario.trim() || undefined,
-      valorArriendoInicial: valor,
-      fechaInicioContrato: form.fechaInicio || null,
-      diaPagoArriendo: dia,
       valorComercial: aNumero(form.valorComercial) || null,
-      aplicaIpc: form.aplicaIpc,
+      generaIngresos: form.generaIngresos,
+      contrato,
     };
     setGuardando(true);
     try {
@@ -159,6 +197,52 @@ export default function PropiedadesScreen() {
     ]);
   }
 
+  // ---------- Contratos ----------
+  function abrirContrato(p: PropiedadConDetalle, c: ContratoArriendo | null) {
+    setFormContrato(
+      c
+        ? {
+            arrendatario: c.arrendatario ?? "",
+            fechaInicio: c.fecha_inicio,
+            canon: Math.round(c.canon_inicial).toLocaleString("es-CO"),
+            diaPago: String(c.dia_pago),
+            duracion: String(c.duracion_meses),
+            aplicaIpc: c.aplica_ipc,
+          }
+        : { ...CONTRATO_VACIO, diaPago: String(p.contratos[0]?.dia_pago ?? 5), canon: p.contratos[0] ? Math.round(p.arriendo.valor || p.contratos[0].canon_inicial).toLocaleString("es-CO") : "" }
+    );
+    setContratoDe({ prop: p, contrato: c && c.id ? c : null });
+  }
+
+  async function guardarContratoModal() {
+    if (!contratoDe) return;
+    const c = leerContrato(formContrato);
+    if (typeof c === "string") return Alert.alert("Contrato", c);
+    setGuardando(true);
+    try {
+      await guardarContrato(contratoDe.prop.id, c, contratoDe.contrato?.id ?? null);
+      setContratoDe(null);
+    } catch (e: any) {
+      Alert.alert("Error", e.message ?? "No se pudo guardar el contrato.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function guardarTerminar() {
+    if (!terminar) return;
+    if (fechaFin < terminar.contrato.fecha_inicio) return Alert.alert("Fecha no válida", "La fecha de salida no puede ser antes del inicio del contrato.");
+    setGuardando(true);
+    try {
+      await terminarContrato(terminar.contrato, fechaFin, motivoFin.trim() || undefined);
+      setTerminar(null);
+    } catch (e: any) {
+      Alert.alert("Error", e.message ?? "No se pudo terminar el contrato.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
   // ---------- IPC ----------
   const aniosIpc = Array.from(new Set([...Object.keys(ipc).map(Number), ...propiedades.flatMap((p) => p.arriendo.ipcFaltante), Number(hoyISO().slice(0, 4)) - 1])).sort((a, b) => b - a);
   const faltantes = Array.from(new Set(propiedades.flatMap((p) => p.arriendo.ipcFaltante)));
@@ -170,7 +254,19 @@ export default function PropiedadesScreen() {
       por_vencer: { t: p.diasParaPago === 0 ? "Vence hoy" : `Vence en ${p.diasParaPago} día(s)`, c: colors.warning, bg: "#FCEFD9", i: "alarm" },
       vencido: { t: `Vencido hace ${Math.abs(p.diasParaPago)} día(s)`, c: colors.danger, bg: "#FBE3E2", i: "alert-circle" },
       pendiente: { t: `Vence el ${formatoFecha(p.fechaPagoMes)}`, c: colors.textSecondary, bg: colors.background, i: "calendar" },
+      sin_contrato: { t: "", c: colors.textSecondary, bg: colors.background, i: "home-outline" },
+      uso_propio: { t: "", c: colors.textSecondary, bg: colors.background, i: "home" },
     }[p.estadoMes];
+    if (p.estadoMes === "uso_propio") return null;
+    if (p.estadoMes === "sin_contrato")
+      return (
+        <View style={[styles.estado, { backgroundColor: cfg.bg }]}>
+          <Ionicons name={cfg.i as any} size={14} color={cfg.c} />
+          <Text style={[styles.estadoTexto, { color: cfg.c }]}>
+            {p.contrato && p.contrato.fecha_inicio > hoyISO() ? `Nuevo contrato empieza el ${formatoFecha(p.contrato.fecha_inicio)}` : "Desocupada: sin contrato vigente, no se espera arriendo."}
+          </Text>
+        </View>
+      );
     return (
       <View style={[styles.estado, { backgroundColor: cfg.bg }]}>
         <Ionicons name={cfg.i as any} size={14} color={cfg.c} />
@@ -181,59 +277,109 @@ export default function PropiedadesScreen() {
     );
   }
 
+  function bannerIpc(p: PropiedadConDetalle) {
+    const v = p.arriendo;
+    const out: React.ReactNode[] = [];
+    v.ajustes
+      .filter((x) => x.pendiente)
+      .forEach((x) =>
+        out.push(
+          <View key={`f${x.fecha}`} style={styles.ipcPide}>
+            <Text style={styles.ipcPideTxt}>
+              El contrato se renovó el {formatoFecha(x.fecha)}. Escribe el IPC de {x.anioIpc} para subir el arriendo desde esa fecha:
+            </Text>
+            <FilaIpc anio={x.anioIpc} valor={ipc[x.anioIpc]} guardar={guardarIpc} />
+          </View>
+        )
+      );
+    const prox = v.proximoIpc;
+    if (prox && prox.falta && diasEntre(hoyISO(), prox.fecha) <= 45 && !v.ipcFaltante.includes(prox.anioIpc))
+      out.push(
+        <View key="prox" style={styles.ipcPide}>
+          <Text style={styles.ipcPideTxt}>
+            El contrato vence el {formatoFecha(prox.fecha)} y el arriendo sube con el IPC de {prox.anioIpc}. Escríbelo cuando el DANE lo publique (enero):
+          </Text>
+          <FilaIpc anio={prox.anioIpc} valor={ipc[prox.anioIpc]} guardar={guardarIpc} />
+        </View>
+      );
+    return out;
+  }
+
   function renderPropiedad(p: PropiedadConDetalle) {
     const abiertaP = abierta === p.id;
     const r = p.rendimiento12m;
+    const c = p.contrato;
+    const vigente = c && c.fecha_inicio <= hoyISO();
     return (
       <Card>
         <TouchableOpacity onPress={() => setAbierta(abiertaP ? null : p.id)} activeOpacity={0.85}>
           <View style={styles.rowStart}>
             <View style={styles.iconoCircle}>
-              <Ionicons name="business" size={17} color={colors.primary} />
+              <Ionicons name={p.genera_ingresos ? "business" : "home"} size={17} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={typography.h3}>{p.nombre}</Text>
-              {p.arrendatario && <Text style={typography.caption}>Arrendatario: {p.arrendatario}</Text>}
+              {!p.genera_ingresos && <Text style={typography.caption}>Uso propio · suma al patrimonio</Text>}
+              {p.genera_ingresos && c?.arrendatario && <Text style={typography.caption}>Arrendatario: {c.arrendatario}</Text>}
+              {p.genera_ingresos && !c && <Text style={typography.caption}>Desocupada</Text>}
             </View>
             <View style={{ alignItems: "flex-end" }}>
-              <Text style={styles.valor}>{pesos(p.arriendo.valor)}</Text>
-              <Text style={typography.caption}>al mes · día {p.dia_pago_arriendo}</Text>
+              {p.genera_ingresos && vigente ? (
+                <>
+                  <Text style={styles.valor}>{pesos(p.arriendo.valor)}</Text>
+                  <Text style={typography.caption}>al mes · día {c!.dia_pago}</Text>
+                </>
+              ) : p.valor_comercial ? (
+                <>
+                  <Text style={styles.valor}>{pesos(Number(p.valor_comercial))}</Text>
+                  <Text style={typography.caption}>valor comercial</Text>
+                </>
+              ) : null}
             </View>
           </View>
 
           {renderEstado(p)}
 
-          {p.arriendo.ultimoAjuste && (
+          {c && (
             <Text style={styles.ipcTexto}>
-              Subió {p.arriendo.ultimoAjuste.ipc.toLocaleString("es-CO")}% (IPC {p.arriendo.ultimoAjuste.anioIpc}) el {formatoFecha(p.arriendo.ultimoAjuste.fecha)}
-              {p.arriendo.proximoAjuste ? ` · próximo ajuste ${formatoFecha(p.arriendo.proximoAjuste)}` : ""}
+              Contrato desde {formatoFecha(c.fecha_inicio)} por {c.duracion_meses} meses
+              {p.arriendo.proximoAjuste ? ` · vence/renueva el ${formatoFecha(p.arriendo.proximoAjuste)}` : ""}
+              {c.aplica_ipc ? "" : " · sin aumento por IPC"}
             </Text>
           )}
-          {!p.arriendo.ultimoAjuste && p.arriendo.proximoAjuste && (
-            <Text style={styles.ipcTexto}>Primer ajuste por IPC el {formatoFecha(p.arriendo.proximoAjuste)}</Text>
-          )}
-          {!p.fecha_inicio_contrato && <Text style={styles.ipcTexto}>Sin fecha de contrato: el arriendo no sube con el IPC. Edítala para activarlo.</Text>}
-          {p.arriendo.ipcFaltante.length > 0 && (
-            <Text style={[styles.ipcTexto, { color: colors.danger }]}>Falta el IPC de {p.arriendo.ipcFaltante.join(", ")}; regístralo abajo para calcular bien el arriendo.</Text>
+          {p.arriendo.ultimoAjuste && (
+            <Text style={styles.ipcTexto}>
+              Último aumento: {p.arriendo.ultimoAjuste.ipc.toLocaleString("es-CO")}% (IPC {p.arriendo.ultimoAjuste.anioIpc}) el {formatoFecha(p.arriendo.ultimoAjuste.fecha)} · canon inicial{" "}
+              {pesos(c?.canon_inicial ?? 0)}
+            </Text>
           )}
 
-          {p.creditos.map((c) => (
-            <View key={c.id} style={styles.creditoFila}>
+          {p.creditos.map((cr) => (
+            <View key={cr.id} style={styles.creditoFila}>
               <Ionicons name="card" size={13} color={colors.primary} />
               <Text style={styles.creditoTexto}>
-                {c.nombre}
-                {c.proximaCuotaValor !== null ? `: cuota #${c.proximaCuotaNumero} ${pesos(c.proximaCuotaValor)} vence ${formatoFecha(c.proximaCuotaFecha!)}` : ": sin cuotas pendientes"}
-                {c.entidad_pago ? ` · ${c.entidad_pago}` : ""}
+                {cr.nombre} ({Math.round(cr.porcentaje * 100) / 100}%)
+                {cr.proximaCuotaValor !== null
+                  ? `: cuota #${cr.proximaCuotaNumero} ${pesos(cr.proximaCuotaValor)}${cr.porcentaje < 100 ? ` (le toca ${pesos((cr.proximaCuotaValor * cr.porcentaje) / 100)})` : ""} vence ${formatoFecha(cr.proximaCuotaFecha!)}`
+                  : ": sin cuotas pendientes"}
               </Text>
             </View>
           ))}
 
-          <View style={styles.rendFila}>
-            <Mini t="Arriendos 12m" v={pesos(r.arriendos)} />
-            <Mini t="Gastos" v={`−${pesos(r.gastos)}`} />
-            <Mini t="Cuotas" v={`−${pesos(r.cuotas)}`} />
-            <Mini t="Rendimiento" v={`${r.neto < 0 ? "−" : ""}${pesos(Math.abs(r.neto))}`} fuerte />
-          </View>
+          {p.genera_ingresos ? (
+            <View style={styles.rendFila}>
+              <Mini t="Arriendos 12m" v={pesos(r.arriendos)} />
+              <Mini t="Gastos" v={`−${pesos(r.gastos)}`} />
+              <Mini t="Cuotas" v={`−${pesos(r.cuotas)}`} />
+              <Mini t="Rendimiento" v={`${r.neto < 0 ? "−" : ""}${pesos(Math.abs(r.neto))}`} fuerte />
+            </View>
+          ) : (
+            <View style={styles.rendFila}>
+              <Mini t="Gastos 12m" v={pesos(r.gastos)} />
+              <Mini t="Cuotas (su parte)" v={pesos(r.cuotas)} />
+              <Mini t="Costo 12m" v={pesos(r.gastos + r.cuotas)} fuerte />
+            </View>
+          )}
           {p.rentabilidadAnual !== null && (
             <Text style={styles.ipcTexto}>
               Rentabilidad últimos 12 meses: {(p.rentabilidadAnual * 100).toLocaleString("es-CO", { maximumFractionDigits: 2 })}% sobre un valor de {pesos(Number(p.valor_comercial))}
@@ -241,26 +387,93 @@ export default function PropiedadesScreen() {
           )}
           <Text style={styles.hint}>{abiertaP ? "Ocultar detalle ▲" : "Ver detalle ▼"}</Text>
         </TouchableOpacity>
+        {bannerIpc(p)}
 
         <View style={styles.acciones}>
-          <TouchableOpacity style={styles.accion} onPress={() => abrirArriendo(p)}>
-            <Ionicons name="cash" size={15} color={colors.primary} />
-            <Text style={styles.accionTexto}>Registrar arriendo</Text>
-          </TouchableOpacity>
+          {p.genera_ingresos && (c || p.arriendos.length > 0) && (
+            <TouchableOpacity style={styles.accion} onPress={() => abrirArriendo(p)}>
+              <Ionicons name="cash" size={15} color={colors.primary} />
+              <Text style={styles.accionTexto}>Registrar arriendo</Text>
+            </TouchableOpacity>
+          )}
+          {p.genera_ingresos && c && (
+            <TouchableOpacity
+              style={styles.accion}
+              onPress={() => {
+                setFechaFin(hoyISO());
+                setMotivoFin("");
+                setTerminar({ prop: p, contrato: c });
+              }}
+            >
+              <Ionicons name="exit" size={15} color={colors.danger} />
+              <Text style={[styles.accionTexto, { color: colors.danger }]}>Se fue el arrendatario</Text>
+            </TouchableOpacity>
+          )}
+          {p.genera_ingresos && !c && (
+            <TouchableOpacity style={styles.accion} onPress={() => abrirContrato(p, null)}>
+              <Ionicons name="document-text" size={15} color={colors.primary} />
+              <Text style={styles.accionTexto}>Nuevo contrato</Text>
+            </TouchableOpacity>
+          )}
+          {p.genera_ingresos && c && (
+            <TouchableOpacity style={styles.accion} onPress={() => abrirContrato(p, c)}>
+              <Ionicons name="document-text" size={15} color={colors.primary} />
+              <Text style={styles.accionTexto}>Corregir contrato</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.accion} onPress={() => abrirEdicion(p)}>
             <Ionicons name="create" size={15} color={colors.primary} />
             <Text style={styles.accionTexto}>Editar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.accion}
+            onPress={() =>
+              Alert.alert("Eliminar propiedad", `¿Eliminar ${p.nombre}, sus contratos y arriendos registrados? Los gastos y créditos no se borran, solo se desvinculan.`, [
+                { text: "Cancelar", style: "cancel" },
+                { text: "Eliminar", style: "destructive", onPress: () => eliminarPropiedad(p.id).catch((e) => Alert.alert("Error", e.message)) },
+              ])
+            }
+          >
+            <Ionicons name="trash" size={15} color={colors.danger} />
           </TouchableOpacity>
         </View>
 
         {abiertaP && (
           <View style={{ marginTop: spacing.md }}>
-            <Text style={styles.label}>Rendimiento de este año ({p.rendimientoAnio.desde.slice(0, 4)})</Text>
-            <Fila t="Arriendos recibidos" v={p.rendimientoAnio.arriendos} />
+            <Text style={styles.label}>
+              {p.genera_ingresos ? "Rendimiento" : "Costo"} de este año ({p.rendimientoAnio.desde.slice(0, 4)})
+            </Text>
+            {p.genera_ingresos && <Fila t="Arriendos recibidos" v={p.rendimientoAnio.arriendos} />}
             <Fila t="Gastos de la propiedad" v={-p.rendimientoAnio.gastos} />
-            <Fila t="Pagos a créditos de la propiedad" v={-p.rendimientoAnio.cuotas} />
-            <Fila t="Rendimiento neto" v={p.rendimientoAnio.neto} fuerte />
-            <Text style={styles.ayuda}>Los gastos se asocian a la propiedad desde Gastos ("¿Es de una propiedad o del carro?"). Los créditos, desde Deudas.</Text>
+            <Fila t="Pagos a créditos (su porcentaje)" v={-p.rendimientoAnio.cuotas} />
+            <Fila t={p.genera_ingresos ? "Rendimiento neto" : "Costo total"} v={p.rendimientoAnio.neto} fuerte />
+            <Text style={styles.ayuda}>Los gastos se asocian a la propiedad desde Gastos. Los créditos y su porcentaje, desde Deudas.</Text>
+
+            {p.contratos.length > 0 && (
+              <>
+                <Text style={[styles.label, { marginTop: spacing.sm }]}>Contratos</Text>
+                {p.contratos.map((k) => (
+                  <TouchableOpacity
+                    key={k.id ?? "viejo"}
+                    style={styles.arriendoFila}
+                    onPress={() =>
+                      k.id &&
+                      Alert.alert("Contrato", `${k.arrendatario ?? "Sin nombre"} · desde ${formatoFecha(k.fecha_inicio)}`, [
+                        { text: "Cerrar", style: "cancel" },
+                        { text: "Corregir", onPress: () => abrirContrato(p, k) },
+                        { text: "Borrar", style: "destructive", onPress: () => eliminarContrato(k).catch((e) => Alert.alert("Error", e.message)) },
+                      ])
+                    }
+                  >
+                    <Ionicons name={k.fecha_fin ? "document-outline" : "document-text"} size={14} color={k.fecha_fin ? colors.textMuted : colors.primary} />
+                    <Text style={[styles.listaTexto, { flex: 1 }]}>
+                      {k.arrendatario ?? "Sin nombre"} · {formatoFecha(k.fecha_inicio)} → {k.fecha_fin ? formatoFecha(k.fecha_fin) : "vigente"} · canon inicial {pesos(k.canon_inicial)}
+                      {k.motivo_fin ? ` · ${k.motivo_fin}` : ""}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
 
             {p.gastosRecientes.length > 0 && (
               <>
@@ -273,20 +486,44 @@ export default function PropiedadesScreen() {
               </>
             )}
 
-            <Text style={[styles.label, { marginTop: spacing.sm }]}>Arriendos recibidos</Text>
-            {p.arriendos.length === 0 && <Text style={styles.listaTexto}>Todavía no hay arriendos registrados.</Text>}
-            {p.arriendos.slice(0, 12).map((a) => (
-              <TouchableOpacity key={a.id} style={styles.arriendoFila} onPress={() => confirmarBorrarArriendo(a)}>
-                <Text style={[styles.listaTexto, { flex: 1 }]}>
-                  {nombreMes(a.mes)} · {pesos(Number(a.monto))} · recibido {formatoFecha(a.fecha)}
-                  {a.destino_persona ? ` · para ${a.destino_persona}` : ""}
-                </Text>
-                <Ionicons name="close-circle-outline" size={15} color={colors.textMuted} />
-              </TouchableOpacity>
-            ))}
+            {p.genera_ingresos && (
+              <>
+                <Text style={[styles.label, { marginTop: spacing.sm }]}>Arriendos recibidos</Text>
+                {p.arriendos.length === 0 && <Text style={styles.listaTexto}>Todavía no hay arriendos registrados.</Text>}
+                {p.arriendos.slice(0, 12).map((a) => (
+                  <TouchableOpacity key={a.id} style={styles.arriendoFila} onPress={() => confirmarBorrarArriendo(a)}>
+                    <Text style={[styles.listaTexto, { flex: 1 }]}>
+                      {nombreMes(a.mes)} · {pesos(Number(a.monto))} · recibido {formatoFecha(a.fecha)}
+                      {a.destino_persona ? ` · para ${a.destino_persona}` : ""}
+                    </Text>
+                    <Ionicons name="close-circle-outline" size={15} color={colors.textMuted} />
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
           </View>
         )}
       </Card>
+    );
+  }
+
+  function camposContrato() {
+    return (
+      <>
+        <TextInput style={styles.input} placeholder="Arrendatario" placeholderTextColor={colors.textMuted} value={formContrato.arrendatario} onChangeText={cambiarC("arrendatario")} />
+        <Text style={styles.label}>Fecha de inicio del contrato</Text>
+        <FechaInput value={formContrato.fechaInicio} onChange={cambiarC("fechaInicio")} />
+        <Text style={styles.label}>Valor del arriendo al iniciar el contrato</Text>
+        <TextInput style={styles.input} placeholder="Ej. 1.500.000" placeholderTextColor={colors.textMuted} value={formContrato.canon} onChangeText={cambiarC("canon")} keyboardType="numeric" />
+        <Text style={styles.label}>Duración del contrato (meses) — en cada vencimiento sube con el IPC</Text>
+        <TextInput style={styles.input} placeholder="12" placeholderTextColor={colors.textMuted} value={formContrato.duracion} onChangeText={cambiarC("duracion")} keyboardType="numeric" />
+        <View style={styles.switchFila}>
+          <Text style={[typography.body, { flex: 1 }]}>Subir con el IPC del año anterior en cada vencimiento</Text>
+          <Switch value={formContrato.aplicaIpc} onValueChange={cambiarC("aplicaIpc")} trackColor={{ true: colors.primary }} />
+        </View>
+        <Text style={styles.label}>Día del mes en que se paga el arriendo</Text>
+        <TextInput style={styles.input} placeholder="Ej. 5" placeholderTextColor={colors.textMuted} value={formContrato.diaPago} onChangeText={cambiarC("diaPago")} keyboardType="numeric" />
+      </>
     );
   }
 
@@ -294,7 +531,7 @@ export default function PropiedadesScreen() {
 
   return (
     <View style={styles.container}>
-      <ScreenHeader title="Propiedades" subtitle="Arriendos y rendimiento" actionLabel="Nueva" onAction={abrirNueva} actionActive={mostrarForm && !editandoId} />
+      <ScreenHeader title="Propiedades" subtitle="Arriendos, uso propio y rendimiento" actionLabel="Nueva" onAction={abrirNueva} actionActive={mostrarForm && !editandoId} />
 
       {mostrarForm ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }} keyboardShouldPersistTaps="handled">
@@ -302,31 +539,23 @@ export default function PropiedadesScreen() {
             <Text style={[typography.h3, { marginBottom: spacing.sm }]}>{editandoId ? "Editar propiedad" : "Nueva propiedad"}</Text>
             <TextInput style={styles.input} placeholder="Nombre (ej. Apto Torre 4)" placeholderTextColor={colors.textMuted} value={form.nombre} onChangeText={cambiar("nombre")} />
             <TextInput style={styles.input} placeholder="Dirección" placeholderTextColor={colors.textMuted} value={form.direccion} onChangeText={cambiar("direccion")} />
-            <TextInput style={styles.input} placeholder="Arrendatario" placeholderTextColor={colors.textMuted} value={form.arrendatario} onChangeText={cambiar("arrendatario")} />
-
-            <Text style={styles.label}>Fecha de inicio del contrato</Text>
-            {form.fechaInicio ? (
-              <FechaInput value={form.fechaInicio} onChange={cambiar("fechaInicio")} max={hoyISO()} />
-            ) : (
-              <TouchableOpacity style={styles.input} onPress={() => cambiar("fechaInicio")(sumarMeses(hoyISO(), -12))}>
-                <Text style={{ color: colors.primary, fontWeight: "600" }}>+ Agregar fecha de inicio</Text>
-              </TouchableOpacity>
-            )}
-            <Text style={styles.label}>{form.fechaInicio ? "Valor del arriendo al iniciar el contrato" : "Valor del arriendo mensual"}</Text>
-            <TextInput style={styles.input} placeholder="Ej. 1.500.000" placeholderTextColor={colors.textMuted} value={form.valorInicial} onChangeText={cambiar("valorInicial")} keyboardType="numeric" />
-
-            <View style={styles.switchFila}>
-              <Text style={[typography.body, { flex: 1 }]}>Subir cada año con el IPC (en el aniversario del contrato)</Text>
-              <Switch value={form.aplicaIpc} onValueChange={cambiar("aplicaIpc")} trackColor={{ true: colors.primary }} />
-            </View>
-
-            <Text style={styles.label}>Día del mes en que se paga el arriendo</Text>
-            <TextInput style={styles.input} placeholder="Ej. 5" placeholderTextColor={colors.textMuted} value={form.diaPago} onChangeText={cambiar("diaPago")} keyboardType="numeric" />
-
-            <Text style={styles.label}>Valor comercial de la propiedad (opcional, para la rentabilidad %)</Text>
+            <Text style={styles.label}>Valor comercial de la propiedad (suma al patrimonio)</Text>
             <TextInput style={styles.input} placeholder="Ej. 350.000.000" placeholderTextColor={colors.textMuted} value={form.valorComercial} onChangeText={cambiar("valorComercial")} keyboardType="numeric" />
 
-            <Text style={styles.ayuda}>Para asociar un crédito a esta propiedad, edítalo en Deudas y elige la propiedad.</Text>
+            <View style={styles.switchFila}>
+              <Text style={[typography.body, { flex: 1 }]}>Se arrienda (genera ingresos). Apágalo si es de uso propio: solo suma a patrimonio y gastos.</Text>
+              <Switch value={form.generaIngresos} onValueChange={cambiar("generaIngresos")} trackColor={{ true: colors.primary }} />
+            </View>
+
+            {form.generaIngresos && !editandoId && (
+              <>
+                <Text style={[typography.h3, { marginVertical: spacing.sm }]}>Contrato de arriendo (opcional)</Text>
+                {camposContrato()}
+              </>
+            )}
+            {form.generaIngresos && editandoId && <Text style={styles.ayuda}>El contrato se maneja desde la tarjeta: «Corregir contrato», «Se fue el arrendatario» o «Nuevo contrato».</Text>}
+
+            <Text style={styles.ayuda}>Para asociar un crédito (o un porcentaje de él) a esta propiedad, edítalo en Deudas.</Text>
             <PrimaryButton title={editandoId ? "Guardar cambios" : "Crear propiedad"} onPress={guardar} loading={guardando} />
             <PrimaryButton title="Cancelar" variant="outline" onPress={() => setMostrarForm(false)} style={{ marginTop: spacing.sm }} />
           </Card>
@@ -420,6 +649,38 @@ export default function PropiedadesScreen() {
               <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
             </TouchableOpacity>
           </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={!!contratoDe} transparent animationType="slide">
+        <View style={styles.modalFondo}>
+          <ScrollView style={styles.modalCaja} contentContainerStyle={{ paddingBottom: spacing.md }} keyboardShouldPersistTaps="handled">
+            <Text style={typography.h2}>{contratoDe?.contrato ? "Corregir contrato" : "Nuevo contrato"}</Text>
+            <Text style={[typography.caption, { marginBottom: spacing.sm }]}>{contratoDe?.prop.nombre}</Text>
+            {contratoDe && camposContrato()}
+            <PrimaryButton title="Guardar contrato" onPress={guardarContratoModal} loading={guardando} />
+            <TouchableOpacity onPress={() => setContratoDe(null)} style={{ marginTop: spacing.md }}>
+              <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={!!terminar} transparent animationType="slide">
+        <View style={styles.modalFondo}>
+          <View style={styles.modalCaja}>
+            <Text style={typography.h2}>Terminar contrato</Text>
+            <Text style={[typography.caption, { marginBottom: spacing.sm }]}>
+              {terminar?.prop.nombre} · {terminar?.contrato.arrendatario ?? "arrendatario"}. Desde esa fecha deja de esperarse el arriendo. Luego puedes crear un contrato nuevo.
+            </Text>
+            <Text style={styles.label}>¿Hasta qué fecha estuvo el arrendatario?</Text>
+            <FechaInput value={fechaFin} onChange={setFechaFin} />
+            <TextInput style={styles.input} placeholder="Motivo (opcional)" placeholderTextColor={colors.textMuted} value={motivoFin} onChangeText={setMotivoFin} />
+            <PrimaryButton title="Confirmar salida" onPress={guardarTerminar} loading={guardando} />
+            <TouchableOpacity onPress={() => setTerminar(null)} style={{ marginTop: spacing.md }}>
+              <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
     </View>
@@ -518,6 +779,8 @@ const styles = StyleSheet.create({
   destinoBox: { backgroundColor: colors.primaryLight, borderRadius: radius.sm, padding: spacing.sm, marginBottom: spacing.md },
   destinoInfo: { fontSize: 12, color: colors.primary, marginBottom: spacing.sm },
   ipcFila: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.sm },
+  ipcPide: { backgroundColor: "#FCEFD9", borderRadius: radius.sm, padding: spacing.sm, marginTop: spacing.sm },
+  ipcPideTxt: { fontSize: 12, color: colors.warning, fontWeight: "600" },
   ipcBoton: { backgroundColor: colors.primary, padding: 9, borderRadius: radius.sm },
   empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
   errorText: { color: colors.danger, padding: spacing.lg },

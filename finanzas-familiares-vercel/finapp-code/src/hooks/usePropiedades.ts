@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
 import { registrarPagoDeuda, restanteDeCuota, reaplicarPagos } from "../utils/pagosDeuda";
 import { hoyISO, sumarMeses } from "../utils/amortizacion";
-import { arriendoVigente, fechaPagoArriendo, diasEntre, ValorArriendo } from "../utils/arriendo";
+import { arriendoDePropiedad, fechaPagoArriendo, diasEntre, ValorArriendo, ContratoArriendo } from "../utils/arriendo";
+import { cargarVinculos } from "../utils/deudaActivos";
 
 export interface ArriendoRow {
   id: string;
@@ -23,6 +24,7 @@ export interface CreditoDePropiedad {
   proximaCuotaValor: number | null; // lo que falta de la próxima cuota
   proximaCuotaFecha: string | null;
   proximaCuotaNumero: number | null;
+  porcentaje: number; // % del crédito que le corresponde a esta propiedad
 }
 
 export interface Rendimiento {
@@ -30,7 +32,7 @@ export interface Rendimiento {
   hasta: string;
   arriendos: number;
   gastos: number;
-  cuotas: number; // pagos a créditos de la propiedad
+  cuotas: number; // pagos a créditos de la propiedad (solo su porcentaje)
   neto: number;
 }
 
@@ -46,15 +48,18 @@ export interface PropiedadConDetalle {
   aplica_ipc: boolean | null;
   dia_pago_arriendo: number;
   credito_id: string | null;
+  genera_ingresos: boolean; // false = uso propio: solo patrimonio y gastos
+  contratos: ContratoArriendo[];
+  contrato: ContratoArriendo | null; // contrato vigente (null = desocupada o uso propio)
   arriendos: ArriendoRow[];
-  arriendo: ValorArriendo; // valor vigente con IPC
+  arriendo: ValorArriendo; // valor vigente con IPC (0 si no hay contrato)
   creditos: CreditoDePropiedad[];
   credito: CreditoDePropiedad | null; // el primero (compatibilidad)
   // estado del arriendo de este mes
   fechaPagoMes: string;
   diasParaPago: number; // negativo = vencido
   recibidoMes: number;
-  estadoMes: "recibido" | "parcial" | "por_vencer" | "vencido" | "pendiente";
+  estadoMes: "recibido" | "parcial" | "por_vencer" | "vencido" | "pendiente" | "sin_contrato" | "uso_propio";
   gastosRecientes: { id: string; item: string; valor: number; fecha: string }[];
   rendimientoAnio: Rendimiento;
   rendimiento12m: Rendimiento;
@@ -65,13 +70,22 @@ export interface PropiedadConDetalle {
 export interface DatosPropiedad {
   nombre: string;
   direccion?: string;
-  arrendatario?: string;
-  valorArriendoInicial: number;
-  fechaInicioContrato?: string | null;
-  diaPagoArriendo?: number;
   valorComercial?: number | null;
-  aplicaIpc?: boolean;
+  generaIngresos: boolean;
+  /** Solo al crear: el primer contrato de arriendo (opcional). */
+  contrato?: DatosContrato | null;
 }
+
+export interface DatosContrato {
+  arrendatario?: string;
+  fechaInicio: string;
+  canonInicial: number;
+  diaPago: number;
+  duracionMeses: number;
+  aplicaIpc: boolean;
+}
+
+const VALOR_VACIO: ValorArriendo = { valor: 0, ultimoAjuste: null, proximoAjuste: null, ipcFaltante: [], ajustes: [], proximoIpc: null };
 
 export type DestinoArriendo =
   | { tipo: "hogar" }
@@ -79,6 +93,13 @@ export type DestinoArriendo =
   | { tipo: "credito"; deudaId: string; valor: number };
 
 const mesDe = (f: string) => String(f).slice(0, 7);
+
+function contratoActivoDe(filas: any[]) {
+  const hoy = hoyISO();
+  return filas
+    .filter((c) => !c.fecha_fin || String(c.fecha_fin).slice(0, 10) >= hoy)
+    .sort((a, b) => String(b.fecha_inicio).localeCompare(String(a.fecha_inicio)))[0] ?? null;
+}
 
 export function usePropiedades() {
   const [propiedades, setPropiedades] = useState<PropiedadConDetalle[]>([]);
@@ -88,7 +109,7 @@ export function usePropiedades() {
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const [rP, rA, rI, rD, rC, rG, rPag] = await Promise.all([
+    const [rP, rA, rI, rD, rC, rG, rPag, rK, vinculos] = await Promise.all([
       supabase.from("propiedades").select("*").order("creado_en", { ascending: false }),
       supabase.from("arriendos_recibidos").select("*").order("fecha", { ascending: false }),
       supabase.from("ipc_anual").select("*"),
@@ -96,7 +117,10 @@ export function usePropiedades() {
       supabase.from("cuotas_deuda").select("deuda_id, numero_cuota, cuota_total, valor_pagado, fecha_vencimiento, estado").eq("estado", "pendiente").order("numero_cuota"),
       supabase.from("gastos").select("id, item, valor, valor_cop, fecha, propiedad_id, borrado").not("propiedad_id", "is", null),
       supabase.from("pagos_deuda").select("deuda_id, valor, fecha, origen"),
+      supabase.from("contratos_arriendo").select("*"),
+      cargarVinculos(),
     ]);
+    const contratosFilas = rK.error ? null : ((rK.data ?? []) as any[]);
     if (rP.error || rA.error) {
       setError((rP.error ?? rA.error)!.message);
       setCargando(false);
@@ -117,7 +141,8 @@ export function usePropiedades() {
 
     const combinadas: PropiedadConDetalle[] = (rP.data ?? []).map((p: any) => {
       const arriendos = (rA.data ?? []).filter((a: any) => a.propiedad_id === p.id) as ArriendoRow[];
-      const deudasProp = deudas.filter((d) => d.propiedad_id === p.id || d.id === p.credito_id);
+      const pctDe = new Map(vinculos.filter((v) => v.tipo === "propiedad" && v.activo_id === p.id).map((v) => [v.deuda_id, v.porcentaje]));
+      const deudasProp = deudas.filter((d) => pctDe.has(d.id));
       const creditos: CreditoDePropiedad[] = deudasProp.map((d) => {
         const prox = pendientes.find((c) => c.deuda_id === d.id);
         return {
@@ -129,14 +154,21 @@ export function usePropiedades() {
           proximaCuotaValor: prox ? restanteDeCuota(prox) : null,
           proximaCuotaFecha: prox?.fecha_vencimiento ?? null,
           proximaCuotaNumero: prox?.numero_cuota ?? null,
+          porcentaje: pctDe.get(d.id) ?? 100,
         };
       });
-      const arriendo = arriendoVigente(p, mapaIpc, hoy);
-      const fechaPagoMes = fechaPagoArriendo(mesActual, p.dia_pago_arriendo);
+      const generaIngresos = p.genera_ingresos !== false;
+      const info = arriendoDePropiedad(p, contratosFilas, mapaIpc, hoy);
+      const arriendo = info.valor ?? VALOR_VACIO;
+      const contrato = info.contrato;
+      const fechaPagoMes = fechaPagoArriendo(mesActual, contrato?.dia_pago ?? p.dia_pago_arriendo);
       const recibidoMes = arriendos.filter((a) => a.mes === mesActual).reduce((s, a) => s + Number(a.monto), 0);
       const diasParaPago = diasEntre(hoy, fechaPagoMes);
-      const estadoMes: PropiedadConDetalle["estadoMes"] =
-        recibidoMes >= arriendo.valor - 1 && recibidoMes > 0
+      const estadoMes: PropiedadConDetalle["estadoMes"] = !generaIngresos
+        ? "uso_propio"
+        : !contrato || contrato.fecha_inicio > hoy
+        ? recibidoMes > 0 ? "recibido" : "sin_contrato"
+        : recibidoMes >= arriendo.valor - 1 && recibidoMes > 0
           ? "recibido"
           : recibidoMes > 0
           ? "parcial"
@@ -146,18 +178,21 @@ export function usePropiedades() {
           ? "por_vencer"
           : "pendiente";
 
-      const ids = new Set(deudasProp.map((d) => d.id));
+
       const rend = (desde: string, hasta: string): Rendimiento => {
         const a = arriendos.filter((x) => x.fecha >= desde && x.fecha <= hasta).reduce((s, x) => s + Number(x.monto), 0);
         const g = gastos.filter((x) => x.propiedad_id === p.id && x.fecha >= desde && x.fecha <= hasta).reduce((s, x) => s + Number(x.valor_cop ?? x.valor), 0);
-        const c = pagos.filter((x) => ids.has(x.deuda_id) && x.fecha >= desde && x.fecha <= hasta).reduce((s, x) => s + Number(x.valor), 0);
+        const c = pagos.filter((x) => pctDe.has(x.deuda_id) && x.fecha >= desde && x.fecha <= hasta).reduce((s, x) => s + (Number(x.valor) * pctDe.get(x.deuda_id)!) / 100, 0);
         return { desde, hasta, arriendos: a, gastos: g, cuotas: c, neto: a - g - c };
       };
       const rendimiento12m = rend(hace12, hoy);
-      const proxCuotasMes = creditos.reduce((s, c) => s + (c.proximaCuotaFecha && mesDe(c.proximaCuotaFecha) === mesActual ? c.proximaCuotaValor ?? 0 : 0), 0);
+      const proxCuotasMes = creditos.reduce((s, c) => s + (c.proximaCuotaFecha && mesDe(c.proximaCuotaFecha) === mesActual ? ((c.proximaCuotaValor ?? 0) * c.porcentaje) / 100 : 0), 0);
 
       return {
         ...p,
+        genera_ingresos: generaIngresos,
+        contratos: info.contratos,
+        contrato,
         arriendos,
         arriendo,
         creditos,
@@ -173,8 +208,8 @@ export function usePropiedades() {
           .map((g) => ({ id: g.id, item: g.item, valor: Number(g.valor_cop ?? g.valor), fecha: g.fecha })),
         rendimientoAnio: rend(inicioAnio, hoy),
         rendimiento12m,
-        rentabilidadAnual: Number(p.valor_comercial) > 0 ? rendimiento12m.neto / Number(p.valor_comercial) : null,
-        netoMesActual: (recibidoMes || arriendo.valor) - proxCuotasMes,
+        rentabilidadAnual: generaIngresos && Number(p.valor_comercial) > 0 ? rendimiento12m.neto / Number(p.valor_comercial) : null,
+        netoMesActual: (recibidoMes || (contrato ? arriendo.valor : 0)) - proxCuotasMes,
       };
     });
 
@@ -191,25 +226,89 @@ export function usePropiedades() {
     return {
       nombre: d.nombre,
       direccion: d.direccion ?? null,
-      arrendatario: d.arrendatario ?? null,
-      valor_arriendo_inicial: d.valorArriendoInicial,
-      valor_arriendo: d.valorArriendoInicial,
-      fecha_inicio_contrato: d.fechaInicioContrato ?? null,
-      dia_pago_arriendo: d.diaPagoArriendo ?? 5,
       valor_comercial: d.valorComercial ?? null,
-      aplica_ipc: d.aplicaIpc ?? true,
+      genera_ingresos: d.generaIngresos,
     };
   }
 
+  /** Copia el contrato vigente a los campos viejos de la propiedad (para pantallas que aún los leen). */
+  async function sincronizarPropiedad(propiedadId: string) {
+    const { data } = await supabase.from("contratos_arriendo").select("*").eq("propiedad_id", propiedadId);
+    const activo = contratoActivoDe((data ?? []) as any[]);
+    await supabase
+      .from("propiedades")
+      .update(
+        activo
+          ? {
+              arrendatario: activo.arrendatario,
+              valor_arriendo: activo.canon_inicial,
+              valor_arriendo_inicial: activo.canon_inicial,
+              fecha_inicio_contrato: activo.fecha_inicio,
+              dia_pago_arriendo: activo.dia_pago,
+              aplica_ipc: activo.aplica_ipc,
+            }
+          : { arrendatario: null, valor_arriendo: 0, valor_arriendo_inicial: null, fecha_inicio_contrato: null }
+      )
+      .eq("id", propiedadId);
+  }
+
   async function crearPropiedad(d: DatosPropiedad) {
-    const { error: err } = await supabase.from("propiedades").insert(fila(d));
+    const c = d.generaIngresos ? d.contrato : null;
+    const { data: creada, error: err } = await supabase
+      .from("propiedades")
+      .insert({ ...fila(d), valor_arriendo: c?.canonInicial ?? 0, arrendatario: c?.arrendatario ?? null, dia_pago_arriendo: c?.diaPago ?? 5 })
+      .select()
+      .single();
     if (err) throw err;
+    if (c && c.canonInicial > 0) await guardarContrato(creada.id, c, null, false);
     await cargar();
   }
 
   async function editarPropiedad(id: string, d: DatosPropiedad) {
     const { error: err } = await supabase.from("propiedades").update(fila(d)).eq("id", id);
     if (err) throw err;
+    await cargar();
+  }
+
+  async function eliminarPropiedad(id: string) {
+    const { error: err } = await supabase.from("propiedades").delete().eq("id", id);
+    if (err) throw err;
+    await cargar();
+  }
+
+  /** Crea un contrato nuevo (o corrige uno existente si se pasa su id). */
+  async function guardarContrato(propiedadId: string, c: DatosContrato, contratoId: string | null, recargar = true) {
+    const filaC = {
+      propiedad_id: propiedadId,
+      arrendatario: c.arrendatario?.trim() || null,
+      fecha_inicio: c.fechaInicio,
+      canon_inicial: Math.round(c.canonInicial),
+      dia_pago: c.diaPago,
+      duracion_meses: c.duracionMeses,
+      aplica_ipc: c.aplicaIpc,
+    };
+    const { error: err } = contratoId
+      ? await supabase.from("contratos_arriendo").update(filaC).eq("id", contratoId)
+      : await supabase.from("contratos_arriendo").insert(filaC);
+    if (err) throw new Error(err.message.includes("contratos_arriendo") ? "Falta correr el archivo sql/9 en Supabase para manejar contratos." : err.message);
+    await sincronizarPropiedad(propiedadId);
+    if (recargar) await cargar();
+  }
+
+  /** El arrendatario se fue: el contrato termina y deja de esperarse arriendo desde esa fecha. */
+  async function terminarContrato(contrato: ContratoArriendo, fechaFin: string, motivo?: string) {
+    if (!contrato.id) throw new Error("Falta correr el archivo sql/9 en Supabase para manejar contratos.");
+    const { error: err } = await supabase.from("contratos_arriendo").update({ fecha_fin: fechaFin, motivo_fin: motivo || null }).eq("id", contrato.id);
+    if (err) throw err;
+    await sincronizarPropiedad(contrato.propiedad_id);
+    await cargar();
+  }
+
+  async function eliminarContrato(contrato: ContratoArriendo) {
+    if (!contrato.id) return;
+    const { error: err } = await supabase.from("contratos_arriendo").delete().eq("id", contrato.id);
+    if (err) throw err;
+    await sincronizarPropiedad(contrato.propiedad_id);
     await cargar();
   }
 
@@ -233,6 +332,7 @@ export function usePropiedades() {
         fecha,
         destino_persona: destino.tipo === "persona" ? destino.persona : null,
         nota: opciones.nota ?? null,
+        ...(propiedades.find((p) => p.id === propiedadId)?.contrato?.id ? { contrato_id: propiedades.find((p) => p.id === propiedadId)!.contrato!.id } : {}),
       })
       .select()
       .single();
@@ -272,5 +372,20 @@ export function usePropiedades() {
     await cargar();
   }
 
-  return { propiedades, ipc, cargando, error, crearPropiedad, editarPropiedad, registrarArriendoRecibido, eliminarArriendo, guardarIpc, recargar: cargar };
+  return {
+    propiedades,
+    ipc,
+    cargando,
+    error,
+    crearPropiedad,
+    editarPropiedad,
+    eliminarPropiedad,
+    guardarContrato,
+    terminarContrato,
+    eliminarContrato,
+    registrarArriendoRecibido,
+    eliminarArriendo,
+    guardarIpc,
+    recargar: cargar,
+  };
 }

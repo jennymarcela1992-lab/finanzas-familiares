@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
 import { hoyISO } from "../utils/amortizacion";
+import { cargarVinculos } from "../utils/deudaActivos";
 
 export const NOMBRES_DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
@@ -54,11 +55,14 @@ export interface VehiculoConResumen {
   arrendatario: string | null;
   cuota_diaria: number;
   dia_descanso: number;
+  genera_ingresos: boolean; // false = uso propio: solo patrimonio y gastos
+  valor_comercial: number | null;
+  creditos: { deuda_id: string; nombre: string; porcentaje: number }[];
   pagos: PagoVehiculoRow[];
   picoPlaca: PicoPlacaRow[];
   picoPlacaHoy: number | null;
   gastos: GastoVehiculo[];
-  pagosCredito: { fecha: string; valor: number }[];
+  pagosCredito: { fecha: string; valor: number }[]; // solo el porcentaje que le corresponde al vehículo
   // mes actual (compatibilidad con el Resumen)
   totalEsperadoMes: number;
   totalRecibidoMes: number;
@@ -72,6 +76,8 @@ export interface DatosVehiculo {
   arrendatario?: string;
   cuotaDiaria: number;
   diaDescanso: number;
+  generaIngresos: boolean;
+  valorComercial?: number | null;
 }
 
 const diaSemanaDe = (f: string) => new Date(Date.UTC(Number(f.slice(0, 4)), Number(f.slice(5, 7)) - 1, Number(f.slice(8, 10)))).getUTCDay();
@@ -126,13 +132,14 @@ export function useVehiculos() {
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const [rV, rP, rPP, rG, rD, rPag] = await Promise.all([
+    const [rV, rP, rPP, rG, rD, rPag, vinculos] = await Promise.all([
       supabase.from("vehiculos").select("*").order("creado_en", { ascending: false }),
       supabase.from("pagos_vehiculo").select("*").order("fecha", { ascending: false }),
       supabase.from("vehiculo_pico_placa").select("*").order("desde", { ascending: false }),
       supabase.from("gastos").select("id, item, valor, valor_cop, fecha, rubro, vehiculo_id, borrado").not("vehiculo_id", "is", null),
-      supabase.from("deudas").select("id, vehiculo_id"),
+      supabase.from("deudas").select("id, nombre"),
       supabase.from("pagos_deuda").select("deuda_id, valor, fecha, origen"),
+      cargarVinculos(),
     ]);
     if (rV.error || rP.error) {
       setError((rV.error ?? rP.error)!.message);
@@ -147,9 +154,12 @@ export function useVehiculos() {
     const pagosDeuda = ((rPag.error ? [] : rPag.data) ?? []).filter((p: any) => p.origen !== "registro_inicial") as any[];
 
     const lista: VehiculoConResumen[] = (rV.data ?? []).map((v: any) => {
-      const creditos = new Set(deudas.filter((d) => d.vehiculo_id === v.id).map((d) => d.id));
+      const pct = new Map(vinculos.filter((x) => x.tipo === "vehiculo" && x.activo_id === v.id).map((x) => [x.deuda_id, x.porcentaje]));
       const base: VehiculoConResumen = {
         ...v,
+        genera_ingresos: v.genera_ingresos !== false,
+        valor_comercial: v.valor_comercial ?? null,
+        creditos: Array.from(pct.entries()).map(([id, porcentaje]) => ({ deuda_id: id, porcentaje, nombre: deudas.find((d) => d.id === id)?.nombre ?? "Crédito" })),
         pagos: (rP.data ?? []).filter((p: any) => p.vehiculo_id === v.id),
         picoPlaca: picoPlaca.filter((p) => p.vehiculo_id === v.id),
         picoPlacaHoy: null,
@@ -157,13 +167,14 @@ export function useVehiculos() {
           .filter((g) => g.vehiculo_id === v.id)
           .map((g) => ({ id: g.id, item: g.item, valor: Number(g.valor_cop ?? g.valor), fecha: g.fecha, rubro: g.rubro }))
           .sort((x, y) => y.fecha.localeCompare(x.fecha)),
-        pagosCredito: pagosDeuda.filter((p) => creditos.has(p.deuda_id)).map((p) => ({ fecha: p.fecha, valor: Number(p.valor) })),
+        pagosCredito: pagosDeuda.filter((p) => pct.has(p.deuda_id)).map((p) => ({ fecha: p.fecha, valor: (Number(p.valor) * pct.get(p.deuda_id)!) / 100 })),
         totalEsperadoMes: 0,
         totalRecibidoMes: 0,
         diasEnMora: 0,
         yaRegistradoHoy: false,
       };
       base.picoPlacaHoy = picoPlacaEn(base.picoPlaca, hoy);
+      if (!base.genera_ingresos) return base;
       const dias = diasDelMes(base, mes, hoy);
       base.totalEsperadoMes = dias.reduce((s, d) => s + d.esperado, 0);
       base.totalRecibidoMes = dias.reduce((s, d) => s + d.recibido, 0);
@@ -182,23 +193,32 @@ export function useVehiculos() {
     cargar();
   }, [cargar]);
 
-  async function crearVehiculo(d: DatosVehiculo) {
-    const { error: err } = await supabase.from("vehiculos").insert({
+  function filaV(d: DatosVehiculo) {
+    return {
       nombre: d.nombre,
       placa: d.placa ?? null,
-      arrendatario: d.arrendatario ?? null,
-      cuota_diaria: d.cuotaDiaria,
+      arrendatario: d.generaIngresos ? d.arrendatario ?? null : null,
+      cuota_diaria: d.generaIngresos ? d.cuotaDiaria : 0,
       dia_descanso: d.diaDescanso,
-    });
+      genera_ingresos: d.generaIngresos,
+      valor_comercial: d.valorComercial ?? null,
+    };
+  }
+
+  async function crearVehiculo(d: DatosVehiculo) {
+    const { error: err } = await supabase.from("vehiculos").insert(filaV(d));
     if (err) throw err;
     await cargar();
   }
 
   async function editarVehiculo(id: string, d: DatosVehiculo) {
-    const { error: err } = await supabase
-      .from("vehiculos")
-      .update({ nombre: d.nombre, placa: d.placa ?? null, arrendatario: d.arrendatario ?? null, cuota_diaria: d.cuotaDiaria, dia_descanso: d.diaDescanso })
-      .eq("id", id);
+    const { error: err } = await supabase.from("vehiculos").update(filaV(d)).eq("id", id);
+    if (err) throw err;
+    await cargar();
+  }
+
+  async function eliminarVehiculo(id: string) {
+    const { error: err } = await supabase.from("vehiculos").delete().eq("id", id);
     if (err) throw err;
     await cargar();
   }
@@ -254,6 +274,7 @@ export function useVehiculos() {
     error,
     crearVehiculo,
     editarVehiculo,
+    eliminarVehiculo,
     registrarDia,
     registrarVarios,
     borrarDia,

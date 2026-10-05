@@ -71,7 +71,7 @@ const ENTRADAS_MENU: EntradaMenu[] = [
       icon: "business",
       items: [
         { key: "Propiedades", label: "Propiedades", icon: "business" },
-        { key: "Vehiculo", label: "Vehículo rentado", icon: "car" },
+        { key: "Vehiculo", label: "Vehículos", icon: "car" },
         { key: "Inversiones", label: "Inversiones", icon: "trending-up" },
       ],
     },
