@@ -454,6 +454,25 @@ export function useDeudas() {
     return objetivo.length;
   }
 
+ /**
+   * Un pago (o parte de una cuota) que se hizo antes de usar la app: se aplica a las cuotas
+   * pero NO crea gasto ni cuenta en el Resumen de estos meses.
+   */
+  async function registrarPagoAnterior(deudaId: string, valor: number, fecha: string) {
+    const yo = await nombreUsuarioActual();
+    const { error: err } = await supabase.from("pagos_deuda").insert({
+      deuda_id: deudaId,
+      fecha,
+      valor: Math.round(valor),
+      origen: "registro_inicial",
+      pagado_por: "Antes de la app",
+      registrado_por: yo.nombre,
+    });
+    chequear(err, "No se pudo registrar el pago anterior");
+    await reaplicarPagos(deudaId);
+    await cargar();
+  }
+
   /** Deshace las cuotas marcadas como "ya pagadas antes de la app" (vuelven a quedar pendientes). */
   async function deshacerYaPagadas(deudaId: string) {
     const { error: err } = await supabase.from("pagos_deuda").delete().eq("deuda_id", deudaId).eq("origen", "registro_inicial");
@@ -574,6 +593,7 @@ export function useDeudas() {
     editarDeuda,
     eliminarDeuda,
     registrarPago,
+    registrarPagoAnterior,
     eliminarPago,
     registrarAbono,
     eliminarAbono,
