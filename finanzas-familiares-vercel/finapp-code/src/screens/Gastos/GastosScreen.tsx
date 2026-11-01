@@ -65,6 +65,7 @@ export default function GastosScreen() {
   const [filtroRubro, setFiltroRubro] = useState<string | null>(null);
   const [filtroMes, setFiltroMes] = useState<string | null>(null); // "AAAA-MM" o null = todos los meses
   const [filtroPersona, setFiltroPersona] = useState<string | null>(null);
+  const [filtroTipo, setFiltroTipo] = useState<"fijos" | "otros" | null>(null); // fijos = automáticos; otros = el resto
   const [verTarjetas, setVerTarjetas] = useState(false); // por defecto, al filtrar mes o persona se muestra en tabla
   const [mostrarForm, setMostrarForm] = useState(false);
   const [item, setItem] = useState("");
@@ -257,7 +258,9 @@ export default function GastosScreen() {
     const coincideRubro = !filtroRubro || g.rubro === filtroRubro;
     const coincideMes = verPapelera || !filtroMes || g.fecha.slice(0, 7) === filtroMes;
     const coincidePersona = verPapelera || !filtroPersona || (g.usuario_pago_nombre ?? "") === filtroPersona;
-    return coincideBusqueda && coincideRubro && coincideMes && coincidePersona;
+    const esFijo = !!(g as any).recurrente_id;
+    const coincideTipo = verPapelera || !filtroTipo || (filtroTipo === "fijos" ? esFijo : !esFijo);
+    return coincideBusqueda && coincideRubro && coincideMes && coincidePersona && coincideTipo;
   });
 
   // Totales de lo que se está viendo, por persona que pagó
@@ -270,7 +273,7 @@ export default function GastosScreen() {
     porPersona.set(k, { total: a.total + valorDe(g), n: a.n + 1 });
   });
 
-  const usarTabla = !verPapelera && !verTarjetas && (!!filtroMes || !!filtroPersona);
+  const usarTabla = !verPapelera && !verTarjetas && (!!filtroMes || !!filtroPersona || !!filtroTipo);
 
   const MESES_TXT = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
   const etiquetaMes = (m: string) => `${MESES_TXT[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
@@ -282,7 +285,7 @@ export default function GastosScreen() {
 
   return (
     <View style={styles.container}>
-      <ScreenHeader title="Gastos" subtitle={`$${(verPapelera ? totalMes : totalFiltrado).toLocaleString("es-CO")} ${filtroMes || filtroPersona || filtroRubro || busqueda.trim() ? "en esta vista" : "registrados"}`} actionLabel="Nuevo" onAction={abrirNuevo} actionActive={mostrarForm && !editando} />
+      <ScreenHeader title="Gastos" subtitle={`$${(verPapelera ? totalMes : totalFiltrado).toLocaleString("es-CO")} ${filtroMes || filtroPersona || filtroTipo || filtroRubro || busqueda.trim() ? "en esta vista" : "registrados"}`} actionLabel="Nuevo" onAction={abrirNuevo} actionActive={mostrarForm && !editando} />
 
       <View style={styles.filtrosRow}>
         <View style={styles.buscadorWrap}>
@@ -389,13 +392,27 @@ export default function GastosScreen() {
         </View>
       )}
 
+      {!verPapelera && (
+        <View style={styles.chipsRowFiltro}>
+          <TouchableOpacity style={[styles.chip, !filtroTipo && styles.chipActivo]} onPress={() => setFiltroTipo(null)}>
+            <Text style={[styles.chipText, !filtroTipo && styles.chipTextActivo]}>Fijos y otros</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.chip, filtroTipo === "fijos" && styles.chipActivo]} onPress={() => setFiltroTipo(filtroTipo === "fijos" ? null : "fijos")}>
+            <Text style={[styles.chipText, filtroTipo === "fijos" && styles.chipTextActivo]}>Solo fijos (automáticos)</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.chip, filtroTipo === "otros" && styles.chipActivo]} onPress={() => setFiltroTipo(filtroTipo === "otros" ? null : "otros")}>
+            <Text style={[styles.chipText, filtroTipo === "otros" && styles.chipTextActivo]}>Solo los demás</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {!verPapelera && listaFiltrada.length > 0 && (
         <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.sm }}>
           <Text style={styles.pista}>
             {listaFiltrada.length} gasto(s) · {pesos(totalFiltrado)}
             {Array.from(porPersona.entries()).map(([n, v]) => `  ·  ${n}: ${pesos(v.total)} (${v.n})`).join("")}
           </Text>
-          {(!!filtroMes || !!filtroPersona) && (
+          {(!!filtroMes || !!filtroPersona || !!filtroTipo) && (
             <TouchableOpacity onPress={() => setVerTarjetas(!verTarjetas)} style={[styles.chip, { alignSelf: "flex-start" }]}>
               <Text style={styles.chipText}>{verTarjetas ? "Ver como tabla" : "Ver como tarjetas"}</Text>
             </TouchableOpacity>
