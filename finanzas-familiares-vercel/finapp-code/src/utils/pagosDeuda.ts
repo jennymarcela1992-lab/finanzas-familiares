@@ -18,6 +18,53 @@ export interface PagoDeudaRow {
   creado_en: string;
 }
 
+export interface PagoAplicado {
+  pago: PagoDeudaRow;
+  aplicado: number; // cuánto de ese pago se fue a ESTA cuota
+  totalPago: number;
+}
+
+/** Texto corto de dónde vino el dinero de un pago. */
+export function origenTexto(p: PagoDeudaRow): string {
+  const quien = p.pagado_por ? ` (${p.pagado_por})` : "";
+  if (p.origen === "registro_inicial") return "ya estaba pagada antes de usar la app";
+  if (p.origen === "arriendo") return `arriendo recibido${quien}`;
+  if (p.origen === "prestamo") return `pago recibido de un préstamo${quien}`;
+  return `gasto pagado por${p.pagado_por ? " " + p.pagado_por : " alguien del hogar"}`;
+}
+
+/**
+ * Qué pagos cubrieron una cuota y cuánto de cada uno. Repite el mismo reparto de reaplicarPagos:
+ * los pagos van en orden de fecha y cubren la cuota más antigua primero; el sobrante pasa a la siguiente.
+ */
+export function pagosDeCuota(
+  pagos: PagoDeudaRow[],
+  cuotas: { numero_cuota: number; cuota_total: number }[],
+  numeroCuota: number
+): PagoAplicado[] {
+  const validos = [...pagos].sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || String(a.creado_en).localeCompare(String(b.creado_en)));
+  const orden = [...cuotas].sort((a, b) => a.numero_cuota - b.numero_cuota);
+  let i = 0;
+  let disponible = validos.length ? Number(validos[0].valor) : 0;
+  for (const c of orden) {
+    const total = Number(c.cuota_total);
+    let aplicado = 0;
+    const partes: PagoAplicado[] = [];
+    while (aplicado < total - 0.5 && i < validos.length) {
+      const toma = Math.min(disponible, total - aplicado);
+      aplicado += toma;
+      disponible -= toma;
+      partes.push({ pago: validos[i], aplicado: toma, totalPago: Number(validos[i].valor) });
+      if (disponible <= 0.5) {
+        i++;
+        disponible = i < validos.length ? Number(validos[i].valor) : 0;
+      }
+    }
+    if (c.numero_cuota === numeroCuota) return partes;
+  }
+  return [];
+}
+
 /** Lo que falta por pagar de la próxima cuota pendiente (para sugerir el valor). */
 export function restanteDeCuota(cuota?: { cuota_total: number; valor_pagado?: number | null } | null): number {
   if (!cuota) return 0;
