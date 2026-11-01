@@ -65,6 +65,7 @@ export default function GastosScreen() {
   const [filtroRubro, setFiltroRubro] = useState<string | null>(null);
   const [filtroMes, setFiltroMes] = useState<string | null>(null); // "AAAA-MM" o null = todos los meses
   const [filtroPersona, setFiltroPersona] = useState<string | null>(null);
+  const [verTarjetas, setVerTarjetas] = useState(false); // por defecto, al filtrar mes o persona se muestra en tabla
   const [mostrarForm, setMostrarForm] = useState(false);
   const [item, setItem] = useState("");
   const [valor, setValor] = useState("");
@@ -269,6 +270,8 @@ export default function GastosScreen() {
     porPersona.set(k, { total: a.total + valorDe(g), n: a.n + 1 });
   });
 
+  const usarTabla = !verPapelera && !verTarjetas && (!!filtroMes || !!filtroPersona);
+
   const MESES_TXT = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
   const etiquetaMes = (m: string) => `${MESES_TXT[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
   function moverMes(delta: number) {
@@ -392,6 +395,11 @@ export default function GastosScreen() {
             {listaFiltrada.length} gasto(s) · {pesos(totalFiltrado)}
             {Array.from(porPersona.entries()).map(([n, v]) => `  ·  ${n}: ${pesos(v.total)} (${v.n})`).join("")}
           </Text>
+          {(!!filtroMes || !!filtroPersona) && (
+            <TouchableOpacity onPress={() => setVerTarjetas(!verTarjetas)} style={[styles.chip, { alignSelf: "flex-start" }]}>
+              <Text style={styles.chipText}>{verTarjetas ? "Ver como tabla" : "Ver como tarjetas"}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -607,6 +615,49 @@ export default function GastosScreen() {
         <ActivityIndicator style={{ marginTop: 24 }} color={colors.primary} />
       ) : error ? (
         <Text style={styles.errorText}>Error cargando gastos: {error}</Text>
+      ) : usarTabla ? (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, paddingBottom: spacing.xxl }}>
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <View style={[styles.tFila, styles.tEnc]}>
+              <Text style={[styles.tCelda, styles.tEncTxt, { width: 74 }]}>Fecha</Text>
+              <Text style={[styles.tCelda, styles.tEncTxt, { flex: 1 }]}>Concepto</Text>
+              <Text style={[styles.tCelda, styles.tEncTxt, { width: 96 }]}>Pagó</Text>
+              <Text style={[styles.tCelda, styles.tEncTxt, styles.tDer, { width: 100 }]}>Valor</Text>
+            </View>
+            {listaFiltrada.length === 0 && <Text style={styles.empty}>No hay gastos con estos filtros.</Text>}
+            {listaFiltrada.map((g, i) => (
+              <TouchableOpacity
+                key={g.id}
+                activeOpacity={0.7}
+                onPress={() => abrirEdicion(g)}
+                onLongPress={() => confirmarBorrado(g)}
+                style={[styles.tFila, i % 2 === 1 && styles.tFilaPar]}
+              >
+                <Text style={[styles.tCelda, { width: 74 }]}>{g.fecha.slice(8, 10)}/{g.fecha.slice(5, 7)}/{g.fecha.slice(2, 4)}</Text>
+                <View style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 6 }}>
+                  <Text style={styles.tTxt}>{g.item}</Text>
+                  <Text style={styles.tSub}>
+                    {g.rubro}
+                    {g.deuda_id ? " · crédito" : ""}
+                    {(g as any).recurrente_id ? " · automático" : ""}
+                    {g.comprobante_url ? " · 📎" : ""}
+                  </Text>
+                </View>
+                <Text style={[styles.tCelda, { width: 96 }]} numberOfLines={2}>{g.usuario_pago_nombre ?? "—"}</Text>
+                <Text style={[styles.tCelda, styles.tDer, styles.tNeg, { width: 100 }]}>
+                  {pesos(valorDe(g))}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {listaFiltrada.length > 0 && (
+              <View style={[styles.tFila, styles.tTotal]}>
+                <Text style={[styles.tCelda, styles.tNeg, { flex: 1 }]}>Total ({listaFiltrada.length})</Text>
+                <Text style={[styles.tCelda, styles.tDer, styles.tNeg, { width: 120 }]}>{pesos(totalFiltrado)}</Text>
+              </View>
+            )}
+          </Card>
+          <Text style={[styles.pista, { marginTop: spacing.sm }]}>Toca una fila para editarla · mantén presionada para enviarla a la papelera.</Text>
+        </ScrollView>
       ) : (
         <FlatList
           data={listaFiltrada}
@@ -721,6 +772,16 @@ const styles = StyleSheet.create({
   buscadorInput: { flex: 1, fontSize: 13, color: colors.textPrimary },
   papeleraBoton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, padding: 9 },
   papeleraBotonActivo: { backgroundColor: colors.danger, borderColor: colors.danger },
+  tFila: { flexDirection: "row", alignItems: "center", borderBottomWidth: 1, borderBottomColor: colors.border },
+  tFilaPar: { backgroundColor: colors.background },
+  tEnc: { backgroundColor: colors.hero },
+  tEncTxt: { color: colors.white, fontWeight: "700" },
+  tCelda: { paddingHorizontal: 6, paddingVertical: 8, fontSize: 12, color: colors.textPrimary },
+  tTxt: { fontSize: 12, color: colors.textPrimary, fontWeight: "600" },
+  tSub: { fontSize: 10, color: colors.textMuted },
+  tDer: { textAlign: "right" },
+  tNeg: { fontWeight: "700" },
+  tTotal: { backgroundColor: colors.primaryLight, borderBottomWidth: 0 },
   chipsRowFiltro: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
   restaurarBoton: { marginLeft: spacing.sm, padding: 6 },
   historialTexto: { fontSize: 11, color: colors.danger, marginTop: 2, fontStyle: "italic" },
