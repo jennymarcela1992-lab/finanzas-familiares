@@ -54,6 +54,7 @@ export default function DeudasScreen() {
     editarDeuda,
     eliminarDeuda,
     registrarPago,
+    registrarPagoAnterior,
     eliminarPago,
     registrarAbono,
     eliminarAbono,
@@ -591,7 +592,7 @@ export default function DeudasScreen() {
               <Accion icono="trash" texto="Eliminar" color={colors.danger} onPress={() => confirmarEliminar(d)} />
             </View>
 
-            {pagoEn === d.id && <FormPago deuda={d} personas={personas} yo={yo} onCerrar={() => setPagoEn(null)} registrar={registrarPago} />}
+            {pagoEn === d.id && <FormPago deuda={d} personas={personas} yo={yo} onCerrar={() => setPagoEn(null)} registrar={registrarPago} registrarAnterior={registrarPagoAnterior} />}
             {abonoEn === d.id && <FormAbono deuda={d} onCerrar={() => setAbonoEn(null)} registrar={registrarAbono} definirMensual={definirAbonoMensual} registrarPago={registrarPago} personas={personas} yo={yo} />}
             {yaPagadasEn === d.id && (
               <FormYaPagadas
@@ -806,16 +807,19 @@ function FormPago({
   yo,
   onCerrar,
   registrar,
+  registrarAnterior,
 }: {
   deuda: DeudaConCuotas;
   personas: string[];
   yo: string;
   onCerrar: () => void;
   registrar: (id: string, valor: number, fecha: string, persona: string) => Promise<void>;
+  registrarAnterior: (id: string, valor: number, fecha: string) => Promise<void>;
 }) {
   const [valor, setValor] = useState(deuda.restanteProxima.toLocaleString("es-CO"));
   const [fecha, setFecha] = useState(hoyISO());
   const [persona, setPersona] = useState(yo || personas[0] || "");
+  const [anterior, setAnterior] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const c = deuda.proximaCuota;
 
@@ -823,10 +827,11 @@ function FormPago({
     const v = aNumero(valor);
     if (!(v > 0)) return Alert.alert("Valor no válido", "Escribe el valor pagado.");
     if (!esFechaValida(fecha)) return Alert.alert("Fecha no válida", "Escribe la fecha así: AAAA-MM-DD.");
-    if (!persona) return Alert.alert("Falta quién pagó", "Elige quién hizo el pago.");
+    if (!anterior && !persona) return Alert.alert("Falta quién pagó", "Elige quién hizo el pago.");
     setGuardando(true);
     try {
-      await registrar(deuda.id, v, fecha, persona);
+      if (anterior) await registrarAnterior(deuda.id, v, fecha);
+      else await registrar(deuda.id, v, fecha, persona);
       onCerrar();
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo registrar el pago.");
@@ -843,20 +848,31 @@ function FormPago({
           Cuota #{c.numero_cuota} vence {formatoFecha(c.fecha_vencimiento)} · falta {pesos(deuda.restanteProxima)}. Si pagas más, el excedente pasa a la siguiente cuota.
         </Text>
       )}
-      <Text style={styles.label}>¿Quién pagó?</Text>
-      <View style={styles.chips}>
-        {(personas.length ? personas : [yo]).filter(Boolean).map((p) => (
-          <TouchableOpacity key={p} onPress={() => setPersona(p)} style={[styles.chip, persona === p && styles.chipActivo]}>
-            <Text style={[styles.chipTexto, persona === p && styles.chipTextoActivo]}>{p}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      <Text style={[styles.ayuda, { marginTop: 4 }]}>Si la pagó un arriendo, regístralo en Propiedades y elige este crédito como destino.</Text>
+      <TouchableOpacity onPress={() => setAnterior(!anterior)} style={[styles.chip, { alignSelf: "flex-start", marginTop: spacing.sm }, anterior && styles.chipActivo]}>
+        <Text style={[styles.chipTexto, anterior && styles.chipTextoActivo]}>{anterior ? "✓ " : ""}Es un pago de antes de usar la app</Text>
+      </TouchableOpacity>
+      {!anterior && (
+        <>
+          <Text style={styles.label}>¿Quién pagó?</Text>
+          <View style={styles.chips}>
+            {(personas.length ? personas : [yo]).filter(Boolean).map((p) => (
+              <TouchableOpacity key={p} onPress={() => setPersona(p)} style={[styles.chip, persona === p && styles.chipActivo]}>
+                <Text style={[styles.chipTexto, persona === p && styles.chipTextoActivo]}>{p}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={[styles.ayuda, { marginTop: 4 }]}>Si la pagó un arriendo, regístralo en Propiedades y elige este crédito como destino.</Text>
+        </>
+      )}
       <Text style={styles.label}>Valor pagado</Text>
       <TextInput style={styles.input} value={valor} onChangeText={setValor} keyboardType="numeric" placeholder="Valor" placeholderTextColor={colors.textMuted} />
       <Text style={styles.label}>Fecha del pago</Text>
       <FechaInput value={fecha} onChange={setFecha} max={hoyISO()} />
-      <Text style={styles.ayuda}>Queda también como gasto (rubro Créditos) a nombre de quien pagó.</Text>
+      <Text style={styles.ayuda}>
+        {anterior
+          ? "Se descuenta de la cuota, pero NO crea gasto ni cuenta en el Resumen de estos meses."
+          : "Queda también como gasto (rubro Créditos) a nombre de quien pagó."}
+      </Text>
       <PrimaryButton title="Guardar pago" onPress={guardar} loading={guardando} />
       <PrimaryButton title="Cancelar" variant="outline" onPress={onCerrar} style={{ marginTop: spacing.sm }} />
     </View>
