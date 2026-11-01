@@ -63,9 +63,25 @@ export default function GastosScreen() {
   const [verPapelera, setVerPapelera] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [filtroRubro, setFiltroRubro] = useState<string | null>(null);
-  const [filtroMes, setFiltroMes] = useState<string | null>(null); // "AAAA-MM" o null = todos los meses
+  // Periodo: todo, un mes, varios meses (desde-hasta) o un año completo
+  const [modoPeriodo, setModoPeriodo] = useState<"todo" | "mes" | "varios" | "anio">("todo");
+  const [mesA, setMesA] = useState(hoyISO().slice(0, 7)); // mes (o "desde" en varios meses)
+  const [mesB, setMesB] = useState(hoyISO().slice(0, 7)); // "hasta" en varios meses
+  const [anioF, setAnioF] = useState(Number(hoyISO().slice(0, 4)));
+  const MESES_TXT = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const etiquetaMes = (m: string) => `${MESES_TXT[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
+  const sumarMes = (m: string, d: number) => {
+    const x = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1 + d, 1);
+    return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`;
+  };
+  // rango de meses "AAAA-MM" que se está viendo (null = sin filtro de fecha)
+  const rangoDesde: string | null = modoPeriodo === "todo" ? null : modoPeriodo === "anio" ? `${anioF}-01` : modoPeriodo === "mes" ? mesA : mesA <= mesB ? mesA : mesB;
+  const rangoHasta: string | null = modoPeriodo === "todo" ? null : modoPeriodo === "anio" ? `${anioF}-12` : modoPeriodo === "mes" ? mesA : mesA <= mesB ? mesB : mesA;
+  const textoPeriodo =
+    modoPeriodo === "todo" ? null : modoPeriodo === "anio" ? `Año ${anioF}` : modoPeriodo === "mes" ? etiquetaMes(mesA) : `${etiquetaMes(rangoDesde!)} a ${etiquetaMes(rangoHasta!)}`;
   const [filtroPersona, setFiltroPersona] = useState<string | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<"fijos" | "otros" | null>(null); // fijos = automáticos; otros = el resto
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false); // el panel de filtros empieza plegado
   const [verTarjetas, setVerTarjetas] = useState(false); // por defecto, al filtrar mes o persona se muestra en tabla
   const [mostrarForm, setMostrarForm] = useState(false);
   const [item, setItem] = useState("");
@@ -256,7 +272,7 @@ export default function GastosScreen() {
   const listaFiltrada = (verPapelera ? papelera : gastos).filter((g) => {
     const coincideBusqueda = !busqueda.trim() || g.item.toLowerCase().includes(busqueda.toLowerCase()) || g.nota?.toLowerCase().includes(busqueda.toLowerCase());
     const coincideRubro = !filtroRubro || g.rubro === filtroRubro;
-    const coincideMes = verPapelera || !filtroMes || g.fecha.slice(0, 7) === filtroMes;
+    const coincideMes = verPapelera || !rangoDesde || (g.fecha.slice(0, 7) >= rangoDesde && g.fecha.slice(0, 7) <= rangoHasta!);
     const coincidePersona = verPapelera || !filtroPersona || (g.usuario_pago_nombre ?? "") === filtroPersona;
     const esFijo = !!(g as any).recurrente_id || !!g.deuda_id; // fijos = automáticos + pagos de créditos
     const coincideTipo = verPapelera || !filtroTipo || (filtroTipo === "fijos" ? esFijo : !esFijo);
@@ -273,19 +289,21 @@ export default function GastosScreen() {
     porPersona.set(k, { total: a.total + valorDe(g), n: a.n + 1 });
   });
 
-  const usarTabla = !verPapelera && !verTarjetas && (!!filtroMes || !!filtroPersona || !!filtroTipo);
+  const resumenFiltros = [
+    textoPeriodo,
+    filtroPersona,
+    filtroTipo === "fijos" ? "Fijos" : filtroTipo === "otros" ? "Los demás" : null,
+    filtroRubro,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
-  const MESES_TXT = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-  const etiquetaMes = (m: string) => `${MESES_TXT[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
-  function moverMes(delta: number) {
-    if (!filtroMes) return setFiltroMes(hoyISO().slice(0, 7));
-    const d = new Date(Number(filtroMes.slice(0, 4)), Number(filtroMes.slice(5, 7)) - 1 + delta, 1);
-    setFiltroMes(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  }
+  const usarTabla = !verPapelera && !verTarjetas && (!!rangoDesde || !!filtroPersona || !!filtroTipo);
+
 
   return (
     <View style={styles.container}>
-      <ScreenHeader title="Gastos" subtitle={`$${(verPapelera ? totalMes : totalFiltrado).toLocaleString("es-CO")} ${filtroMes || filtroPersona || filtroTipo || filtroRubro || busqueda.trim() ? "en esta vista" : "registrados"}`} actionLabel="Nuevo" onAction={abrirNuevo} actionActive={mostrarForm && !editando} />
+      <ScreenHeader title="Gastos" subtitle={`$${(verPapelera ? totalMes : totalFiltrado).toLocaleString("es-CO")} ${rangoDesde || filtroPersona || filtroTipo || filtroRubro || busqueda.trim() ? "en esta vista" : "registrados"}`} actionLabel="Nuevo" onAction={abrirNuevo} actionActive={mostrarForm && !editando} />
 
       <View style={styles.filtrosRow}>
         <View style={styles.buscadorWrap}>
@@ -360,11 +378,18 @@ export default function GastosScreen() {
       {!verPapelera && (
         <View style={styles.panelFiltros}>
           <View style={styles.panelFiltrosTop}>
-            <Text style={styles.panelFiltrosTitulo}>🔎 Filtrar los gastos</Text>
-            {(!!filtroMes || !!filtroPersona || !!filtroTipo || !!filtroRubro) && (
+            <TouchableOpacity style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }} onPress={() => setFiltrosAbiertos(!filtrosAbiertos)}>
+              <Text style={styles.panelFiltrosTitulo}>🔎 Filtros {filtrosAbiertos ? "▴" : "▾"}</Text>
+              {!filtrosAbiertos && (
+                <Text style={styles.resumenFiltro} numberOfLines={1}>
+                  {resumenFiltros || "Periodo, quién pagó, tipo y rubro (toca para abrir)"}
+                </Text>
+              )}
+            </TouchableOpacity>
+            {(!!rangoDesde || !!filtroPersona || !!filtroTipo || !!filtroRubro) && (
               <TouchableOpacity
                 onPress={() => {
-                  setFiltroMes(null);
+                  setModoPeriodo("todo");
                   setFiltroPersona(null);
                   setFiltroTipo(null);
                   setFiltroRubro(null);
@@ -375,18 +400,62 @@ export default function GastosScreen() {
             )}
           </View>
 
-          <Text style={styles.filtroEtiqueta}>MES</Text>
+          {filtrosAbiertos && (
+            <>
+          <Text style={styles.filtroEtiqueta}>PERIODO</Text>
           <View style={styles.filtroFila}>
-            <TouchableOpacity style={styles.chip} onPress={() => moverMes(-1)}>
-              <Text style={styles.chipText}>‹</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.chip, !!filtroMes && styles.chipActivo]} onPress={() => setFiltroMes(filtroMes ? null : hoyISO().slice(0, 7))}>
-              <Text style={[styles.chipText, !!filtroMes && styles.chipTextActivo]}>{filtroMes ? etiquetaMes(filtroMes) : "Todos los meses"}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.chip} onPress={() => moverMes(1)}>
-              <Text style={styles.chipText}>›</Text>
-            </TouchableOpacity>
+            {([["todo", "Todo"], ["mes", "Un mes"], ["varios", "Varios meses"], ["anio", "Un año"]] as const).map(([k, t]) => (
+              <TouchableOpacity key={k} style={[styles.chip, modoPeriodo === k && styles.chipActivo]} onPress={() => setModoPeriodo(k)}>
+                <Text style={[styles.chipText, modoPeriodo === k && styles.chipTextActivo]}>{t}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
+          {modoPeriodo === "mes" && (
+            <View style={styles.filtroFila}>
+              <TouchableOpacity style={styles.chip} onPress={() => setMesA(sumarMes(mesA, -1))}>
+                <Text style={styles.chipText}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.periodoTexto}>{etiquetaMes(mesA)}</Text>
+              <TouchableOpacity style={styles.chip} onPress={() => setMesA(sumarMes(mesA, 1))}>
+                <Text style={styles.chipText}>›</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {modoPeriodo === "anio" && (
+            <View style={styles.filtroFila}>
+              <TouchableOpacity style={styles.chip} onPress={() => setAnioF(anioF - 1)}>
+                <Text style={styles.chipText}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.periodoTexto}>{anioF}</Text>
+              <TouchableOpacity style={styles.chip} onPress={() => setAnioF(anioF + 1)}>
+                <Text style={styles.chipText}>›</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {modoPeriodo === "varios" && (
+            <>
+              <View style={styles.filtroFila}>
+                <Text style={styles.periodoRotulo}>Desde</Text>
+                <TouchableOpacity style={styles.chip} onPress={() => setMesA(sumarMes(mesA, -1))}>
+                  <Text style={styles.chipText}>‹</Text>
+                </TouchableOpacity>
+                <Text style={styles.periodoTexto}>{etiquetaMes(mesA)}</Text>
+                <TouchableOpacity style={styles.chip} onPress={() => setMesA(sumarMes(mesA, 1))}>
+                  <Text style={styles.chipText}>›</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.filtroFila}>
+                <Text style={styles.periodoRotulo}>Hasta</Text>
+                <TouchableOpacity style={styles.chip} onPress={() => setMesB(sumarMes(mesB, -1))}>
+                  <Text style={styles.chipText}>‹</Text>
+                </TouchableOpacity>
+                <Text style={styles.periodoTexto}>{etiquetaMes(mesB)}</Text>
+                <TouchableOpacity style={styles.chip} onPress={() => setMesB(sumarMes(mesB, 1))}>
+                  <Text style={styles.chipText}>›</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
 
           <Text style={styles.filtroEtiqueta}>QUIÉN PAGÓ</Text>
           <View style={styles.filtroFila}>
@@ -424,6 +493,8 @@ export default function GastosScreen() {
               </TouchableOpacity>
             ))}
           </View>
+            </>
+          )}
         </View>
       )}
       {!verPapelera && listaFiltrada.length > 0 && (
@@ -432,7 +503,7 @@ export default function GastosScreen() {
             {listaFiltrada.length} gasto(s) · {pesos(totalFiltrado)}
             {Array.from(porPersona.entries()).map(([n, v]) => `  ·  ${n}: ${pesos(v.total)} (${v.n})`).join("")}
           </Text>
-          {(!!filtroMes || !!filtroPersona || !!filtroTipo) && (
+          {(!!rangoDesde || !!filtroPersona || !!filtroTipo) && (
             <TouchableOpacity onPress={() => setVerTarjetas(!verTarjetas)} style={[styles.chip, { alignSelf: "flex-start" }]}>
               <Text style={styles.chipText}>{verTarjetas ? "Ver como tabla" : "Ver como tarjetas"}</Text>
             </TouchableOpacity>
@@ -822,6 +893,9 @@ const styles = StyleSheet.create({
   panelFiltros: { marginHorizontal: spacing.lg, marginBottom: spacing.md, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   panelFiltrosTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2 },
   panelFiltrosTitulo: { fontSize: 14, fontWeight: "800", color: colors.textPrimary },
+  resumenFiltro: { fontSize: 12, color: colors.textSecondary, flexShrink: 1 },
+  periodoTexto: { fontSize: 13, fontWeight: "700", color: colors.textPrimary, marginRight: 6, marginBottom: 6, minWidth: 120, textAlign: "center" },
+  periodoRotulo: { fontSize: 12, color: colors.textSecondary, width: 44, marginBottom: 6 },
   limpiar: { fontSize: 12, fontWeight: "700", color: colors.accent },
   filtroEtiqueta: { fontSize: 10, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginTop: spacing.sm, marginBottom: 4 },
   filtroFila: { flexDirection: "row", flexWrap: "wrap", alignItems: "center" },
