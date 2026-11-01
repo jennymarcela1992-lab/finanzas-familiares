@@ -44,7 +44,7 @@ export interface NuevoGasto {
   comprobanteUri?: string; // uri local de la foto elegida, antes de subirla
   moneda?: string; // COP por defecto
   valorCop?: number; // ya convertido a pesos, calculado con la tasa de cambio
-  deudaId?: string; // si el gasto es el pago de un crédito
+  deudaId?: string | null; // si el gasto es el pago de un crédito (al editar, null = quitar el vínculo)
   propiedadId?: string | null;
   vehiculoId?: string | null;
   pagadoPor?: string; // quién pagó (por defecto, el usuario que lo registra)
@@ -238,6 +238,7 @@ export function useGastos() {
         comprobante_url: comprobanteUrl,
         ...(cambios.propiedadId !== undefined ? { propiedad_id: cambios.propiedadId } : {}),
         ...(cambios.vehiculoId !== undefined ? { vehiculo_id: cambios.vehiculoId } : {}),
+        ...(cambios.deudaId !== undefined ? { deuda_id: cambios.deudaId } : {}),
         ...(cambios.pagadoPor
           ? {
               usuario_pago_nombre: cambios.pagadoPor,
@@ -253,13 +254,35 @@ export function useGastos() {
       await supabase.storage.from(BUCKET).remove([rutaDeComprobante(actual.comprobante_url)]);
     }
 
-    if (actual.deuda_id) {
+    const nuevaDeuda = cambios.deudaId === undefined ? actual.deuda_id : cambios.deudaId;
+    if (actual.deuda_id && nuevaDeuda === actual.deuda_id) {
       const { error: errPago } = await supabase
         .from("pagos_deuda")
         .update({ valor: Math.round(valorCop), fecha: cambios.fecha, ...(cambios.pagadoPor ? { pagado_por: cambios.pagadoPor } : {}) })
         .eq("gasto_id", id);
       if (errPago) throw new Error(`Se guardó el gasto, pero no se pudo actualizar el pago del crédito: ${errPago.message}`);
       await reaplicarPagos(actual.deuda_id);
+    } else {
+      // se cambió o se quitó el crédito al que pertenece este gasto, o se asoció uno por primera vez
+      if (actual.deuda_id) {
+        await supabase.from("pagos_deuda").delete().eq("gasto_id", id);
+        await reaplicarPagos(actual.deuda_id);
+      }
+      if (nuevaDeuda) {
+        try {
+          await registrarPagoDeuda({
+            deudaId: nuevaDeuda,
+            valor: valorCop,
+            fecha: cambios.fecha,
+            origen: "persona",
+            pagadoPor: cambios.pagadoPor ?? actual.usuario_pago_nombre ?? "",
+            gastoId: id,
+          });
+        } catch (e) {
+          await supabase.from("gastos").update({ deuda_id: null }).eq("id", id);
+          throw e;
+        }
+      }
     }
     await cargarGastos();
   }
