@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useDeudas, DeudaConCuotas, CuotaRow, AbonoRow, DatosDeuda } from "../../hooks/useDeudas";
 import { usePersonas } from "../../hooks/usePersonas";
 import { useActivos } from "../../hooks/useActivos";
-import { PagoDeudaRow } from "../../utils/pagosDeuda";
+import { PagoDeudaRow, pagosDeCuota, origenTexto } from "../../utils/pagosDeuda";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import ProgressBar from "../../components/ProgressBar";
@@ -241,19 +241,36 @@ export default function DeudasScreen() {
     ]);
   }
 
+  /** Detalle de cómo se fue pagando una cuota: cada pago, cuándo, quién y de dónde vino el dinero. */
+  function detalleCuota(c: CuotaRow): string {
+    const deuda = deudas.find((x) => x.id === c.deuda_id);
+    if (!deuda) return "";
+    const partes = pagosDeCuota(deuda.pagos, deuda.cuotas, c.numero_cuota);
+    const cuota = Number(c.cuota_total);
+    if (!partes.length) return `Cuota de ${pesos(cuota)} · sin pagos registrados.`;
+    const lineas = partes.map((x, i) => {
+      const resto = x.aplicado < x.totalPago - 0.5 ? ` (de un pago de ${pesos(x.totalPago)}; el resto pasó a otra cuota)` : "";
+      return `${i + 1}. ${formatoFecha(x.pago.fecha)} · ${pesos(x.aplicado)}${resto}\n    ${origenTexto(x.pago)}`;
+    });
+    const pagado = partes.reduce((s, x) => s + x.aplicado, 0);
+    const falta = cuota - pagado;
+    return `Cuota de ${pesos(cuota)} · ${partes.length} pago${partes.length === 1 ? "" : "s"}:\n${lineas.join("\n")}\n\nTotal pagado ${pesos(pagado)}${falta > 1 ? ` · falta ${pesos(falta)}` : ""}`;
+  }
+
   function tocarCuota(c: CuotaRow) {
     if (c.estado === "pagada") {
       const deuda = deudas.find((x) => x.id === c.deuda_id);
       Alert.alert(
         `Cuota #${c.numero_cuota} pagada`,
-        `Pagó: ${c.pagada_por ?? "—"}${c.fecha_pago ? ` · ${formatoFecha(c.fecha_pago)}` : ""}\n\n¿Quieres desmarcarla? Se borra el pago que la cubrió (y su gasto, si tiene). También puedes verlos en la pestaña "Pagos".`,
+        `${detalleCuota(c)}\n\n¿Quieres desmarcarla? Se borra el pago que la cubrió (y su gasto, si tiene). También puedes verlos en la pestaña "Pagos".`,
         [
           { text: "Dejarla pagada", style: "cancel" },
           { text: "Desmarcar", style: "destructive", onPress: () => deuda && desmarcarCuota(deuda.id, c).catch((e) => Alert.alert("Error", e.message)) },
         ]
       );
     } else {
-      Alert.alert(`Cuota #${c.numero_cuota}`, `Falta ${pesos(Number(c.cuota_total) - Number(c.valor_pagado ?? 0))}. Queda pagada cuando registres el pago (botón "Registrar pago", un gasto de crédito o un arriendo).`);
+      const detalle = Number(c.valor_pagado ?? 0) > 0 ? `${detalleCuota(c)}\n\n` : "";
+      Alert.alert(`Cuota #${c.numero_cuota}`, `${detalle}Falta ${pesos(Number(c.cuota_total) - Number(c.valor_pagado ?? 0))}. Queda pagada cuando registres el pago (botón "Registrar pago", un gasto de crédito o un arriendo).`);
     }
   }
 
