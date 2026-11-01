@@ -87,7 +87,7 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.primary, paddingHorizontal: spacing.xl },
+  container: { flex: 1, backgroundColor: colors.hero, paddingHorizontal: spacing.xl },
   logoCircle: {
     width: 64,
     height: 64,

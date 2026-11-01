@@ -250,10 +250,10 @@ export default function PropiedadesScreen() {
 
   function renderEstado(p: PropiedadConDetalle) {
     const cfg = {
-      recibido: { t: `Recibido ${pesos(p.recibidoMes)}`, c: colors.success, bg: "#E3F3EC", i: "checkmark-circle" },
-      parcial: { t: `Parcial: falta ${pesos(p.arriendo.valor - p.recibidoMes)}`, c: colors.warning, bg: "#FCEFD9", i: "time" },
-      por_vencer: { t: p.diasParaPago === 0 ? "Vence hoy" : `Vence en ${p.diasParaPago} día(s)`, c: colors.warning, bg: "#FCEFD9", i: "alarm" },
-      vencido: { t: `Vencido hace ${Math.abs(p.diasParaPago)} día(s)`, c: colors.danger, bg: "#FBE3E2", i: "alert-circle" },
+      recibido: { t: `Recibido ${pesos(p.recibidoMes)}`, c: colors.success, bg: colors.successBg, i: "checkmark-circle" },
+      parcial: { t: `Parcial: falta ${pesos(p.arriendo.valor - p.recibidoMes)}`, c: colors.warning, bg: colors.warningBg, i: "time" },
+      por_vencer: { t: p.diasParaPago === 0 ? "Vence hoy" : `Vence en ${p.diasParaPago} día(s)`, c: colors.warning, bg: colors.warningBg, i: "alarm" },
+      vencido: { t: `Vencido hace ${Math.abs(p.diasParaPago)} día(s)`, c: colors.danger, bg: colors.dangerBg, i: "alert-circle" },
       pendiente: { t: `Vence el ${formatoFecha(p.fechaPagoMes)}`, c: colors.textSecondary, bg: colors.background, i: "calendar" },
       sin_contrato: { t: "", c: colors.textSecondary, bg: colors.background, i: "home-outline" },
       uso_propio: { t: "", c: colors.textSecondary, bg: colors.background, i: "home" },
@@ -800,7 +800,7 @@ const styles = StyleSheet.create({
   destinoBox: { backgroundColor: colors.primaryLight, borderRadius: radius.sm, padding: spacing.sm, marginBottom: spacing.md },
   destinoInfo: { fontSize: 12, color: colors.primary, marginBottom: spacing.sm },
   ipcFila: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.sm },
-  ipcPide: { backgroundColor: "#FCEFD9", borderRadius: radius.sm, padding: spacing.sm, marginTop: spacing.sm },
+  ipcPide: { backgroundColor: colors.warningBg, borderRadius: radius.sm, padding: spacing.sm, marginTop: spacing.sm },
   ipcPideTxt: { fontSize: 12, color: colors.warning, fontWeight: "600" },
   ipcBoton: { backgroundColor: colors.primary, padding: 9, borderRadius: radius.sm },
   empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },

@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "backgroundColor": "#1F6F5C"
+      "backgroundColor": "#0A2E5C"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -18,7 +18,7 @@
     "android": {
       "package": "com.tuempresa.finanzasfamiliares",
       "adaptiveIcon": {
-        "backgroundColor": "#1F6F5C"
+        "backgroundColor": "#0A2E5C"
       }
     },
     "web": {
@@ -26,8 +26,8 @@
       "name": "Finanzas Familiares",
       "shortName": "Finanzas",
       "lang": "es",
-      "themeColor": "#1F6F5C",
-      "backgroundColor": "#1F6F5C",
+      "themeColor": "#0A2E5C",
+      "backgroundColor": "#0A2E5C",
       "favicon": "./public/favicon.png"
     }
   }

@@ -174,7 +174,7 @@ export default function DashboardScreen() {
       {encabezado}
 
       {/* ---------- 1. Balance del mes ---------- */}
-      <Card style={{ backgroundColor: colors.primary }}>
+      <Card style={{ backgroundColor: colors.hero }}>
         <Text style={styles.heroEtiqueta}>{esMesActual ? "Te queda este mes" : `Quedó en ${nombreMesSolo(mes)}`}</Text>
         <Text style={styles.heroValor}>
           {quedo < 0 ? "−" : ""}
@@ -444,7 +444,7 @@ function FilaPago({ p }: { p: PagoProximo }) {
   const urgente = p.vencido || (dias !== null && dias <= 3);
   return (
     <View style={styles.pagoFila}>
-      <View style={[styles.pagoIcono, p.tipo === "arriendo" && { backgroundColor: "#E3F3EC" }]}>
+      <View style={[styles.pagoIcono, p.tipo === "arriendo" && { backgroundColor: colors.successBg }]}>
         <Ionicons name={icono as any} size={16} color={p.tipo === "arriendo" ? colors.success : colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
@@ -678,8 +678,8 @@ const styles = StyleSheet.create({
   avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center", marginRight: 4 },
   avatarText: { color: colors.primary, fontWeight: "800" },
   pill: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill },
-  pillWarning: { backgroundColor: "#FCEFD9" },
-  pillDanger: { backgroundColor: "#FBE3E2" },
+  pillWarning: { backgroundColor: colors.warningBg },
+  pillDanger: { backgroundColor: colors.dangerBg },
   pillSuccess: { backgroundColor: colors.primaryLight },
   pillNeutro: { backgroundColor: colors.background },
   pillText: { fontSize: 10, fontWeight: "700" },

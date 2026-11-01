@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
   cuadrito: { width: 10, height: 10, borderRadius: 3 },
   leyendaTexto: { fontSize: 12, color: colors.textSecondary },
   guia: { position: "absolute", left: 0, right: 0, borderTopWidth: 1, borderTopColor: colors.border },
-  base: { borderTopColor: "#C9D1CF" },
+  base: { borderTopColor: colors.border },
   guiaTexto: { position: "absolute", left: 0, top: -14, fontSize: 10, color: colors.textMuted },
   columnas: { position: "absolute", left: 34, right: 0, top: 0, bottom: 0, flexDirection: "row", justifyContent: "space-around" },
   columna: { flex: 1, alignItems: "center", justifyContent: "flex-end", borderRadius: radius.sm, paddingTop: 4 },

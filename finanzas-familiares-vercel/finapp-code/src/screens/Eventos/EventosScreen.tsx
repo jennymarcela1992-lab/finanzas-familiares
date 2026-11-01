@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
   iconoCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
   pill: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, marginTop: spacing.sm },
   pillSuccess: { backgroundColor: colors.primaryLight },
-  pillWarning: { backgroundColor: "#FCEFD9" },
+  pillWarning: { backgroundColor: colors.warningBg },
   pillText: { fontSize: 11, fontWeight: "700" },
   pillTextSuccess: { color: colors.success },
   pillTextWarning: { color: colors.warning },

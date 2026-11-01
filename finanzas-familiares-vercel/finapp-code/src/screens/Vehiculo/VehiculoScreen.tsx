@@ -17,13 +17,13 @@ const CORTOS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 const corto = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(Math.round(n)));
 
 const COLOR_DIA: Record<string, { bg: string; fg: string }> = {
-  pagado: { bg: "#E3F3EC", fg: "#1F7A55" },
-  parcial: { bg: "#FCEFD9", fg: "#A9600F" },
-  de_mas: { bg: "#E3EAF3", fg: "#0A2E5C" },
-  no_pagado: { bg: "#FBE3E2", fg: "#B23B37" },
-  sin_registro: { bg: "#FFFFFF", fg: "#B23B37" },
-  libre: { bg: "#F1F3F2", fg: "#7A8784" },
-  futuro: { bg: "#FFFFFF", fg: "#B9C2C0" },
+  pagado: { bg: colors.successBg, fg: colors.success },
+  parcial: { bg: colors.warningBg, fg: colors.warning },
+  de_mas: { bg: colors.infoBg, fg: colors.primary },
+  no_pagado: { bg: colors.dangerBg, fg: colors.danger },
+  sin_registro: { bg: colors.surface, fg: colors.danger },
+  libre: { bg: colors.mutedBg, fg: colors.textMuted },
+  futuro: { bg: colors.surface, fg: colors.textMuted },
 };
 
 const FORM_VACIO = { nombre: "", placa: "", arrendatario: "", cuota: "", descanso: 0, generaIngresos: true, valorComercial: "" };
@@ -572,7 +572,7 @@ const styles = StyleSheet.create({
   celda: { width: `${100 / 7}%`, padding: 2 },
   celdaIn: { borderRadius: 6, paddingVertical: 4, alignItems: "center", borderWidth: 1, borderColor: "transparent", minHeight: 40 },
   hoy: { borderColor: colors.primary, borderWidth: 2 },
-  sinReg: { borderColor: "#F2C4C2", borderStyle: "dashed" },
+  sinReg: { borderColor: colors.dangerBg, borderStyle: "dashed" },
   celdaNum: { fontSize: 11, fontWeight: "700", color: colors.textPrimary },
   celdaTxt: { fontSize: 10, fontWeight: "700" },
   leyenda: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },

@@ -74,7 +74,7 @@ export default function IngresosScreen() {
         <Text style={styles.errorText}>Error cargando ingresos: {error}</Text>
       ) : (
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, gap: spacing.md, width: "100%", maxWidth: 760, alignSelf: "center" }}>
-          <Card style={{ backgroundColor: colors.primary }}>
+          <Card style={{ backgroundColor: colors.hero }}>
             <Text style={styles.heroEtiqueta}>Entradas del hogar en {MESES[Number(mes.slice(5, 7)) - 1]}</Text>
             <Text style={styles.heroValor}>{pesos(a.ingresos)}</Text>
             <Text style={styles.heroDetalle}>

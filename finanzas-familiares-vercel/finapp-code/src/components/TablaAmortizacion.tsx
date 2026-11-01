@@ -235,9 +235,9 @@ function Dato({ t, v }: { t: string; v: string }) {
   );
 }
 
-const COLOR_PAGADA = "#E3F3EC";
-const COLOR_PROXIMA = "#FCEFD9";
-const COLOR_EVENTO = "#E3EAF3";
+const COLOR_PAGADA = colors.successBg;
+const COLOR_PROXIMA = colors.warningBg;
+const COLOR_EVENTO = colors.infoBg;
 
 const styles = StyleSheet.create({
   resumen: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: spacing.sm },
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
   descargar: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.primary },
   descargarTexto: { fontSize: 11, color: colors.primary, fontWeight: "700" },
   fila: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border },
-  encabezado: { backgroundColor: colors.primary },
+  encabezado: { backgroundColor: colors.hero },
   celda: { paddingHorizontal: 6, paddingVertical: 6, fontSize: 11, color: colors.textPrimary },
   celdaEnc: { color: colors.white, fontWeight: "700" },
   der: { textAlign: "right" },

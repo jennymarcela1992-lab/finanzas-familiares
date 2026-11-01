@@ -273,7 +273,7 @@ const PrestamosPanel = forwardRef<PrestamosPanelRef, Props>(function PrestamosPa
         <Text style={styles.listaTxt}>
           Tasa {pct(p.iMensual)} M.V. ({pct(ea(p.iMensual))} E.A.) · rendimiento a la fecha {pct(Number(p.monto) > 0 ? p.interesesRecibidos / Number(p.monto) : 0)}
         </Text>
-        <View style={[styles.origen, d && margen < 0 && { backgroundColor: "#FDE6E3" }]}>
+        <View style={[styles.origen, d && margen < 0 && { backgroundColor: colors.dangerBg }]}>
           <Ionicons name={d ? "card" : "home"} size={14} color={d && margen < 0 ? colors.danger : colors.primary} />
           <Text style={[styles.listaTxt, { flex: 1 }]}>
             {d ? (
@@ -724,7 +724,7 @@ const styles = StyleSheet.create({
   rowStart: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   iconoCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
   pct: { fontSize: 15, fontWeight: "800", color: colors.primary },
-  aviso: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.sm, backgroundColor: "#FCEFD9", padding: spacing.sm, borderRadius: radius.sm },
+  aviso: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.sm, backgroundColor: colors.warningBg, padding: spacing.sm, borderRadius: radius.sm },
   avisoTxt: { fontSize: 12, color: colors.warning, fontWeight: "600", flex: 1 },
   hint: { fontSize: 11, color: colors.textMuted, marginTop: spacing.sm },
   acciones: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: spacing.sm },

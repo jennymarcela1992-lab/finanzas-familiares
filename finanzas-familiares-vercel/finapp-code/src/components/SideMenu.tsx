@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Pressable } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Pressable, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { colors, spacing, radius } from "../theme/theme";
+import { colors, spacing, radius, esOscuro, preferenciaTema, guardarPreferenciaTema, PreferenciaTema } from "../theme/theme";
 
 const ANCHO_MENU = Math.min(280, Dimensions.get("window").width * 0.78);
 
@@ -109,6 +109,28 @@ export default function SideMenu({ visible, activeScreen, entradas, onSelect, on
             );
           })}
         </View>
+
+        {Platform.OS === "web" && (
+          <View style={styles.temaWrap}>
+            <Text style={styles.temaTitulo}>Apariencia {esOscuro ? "(oscuro)" : "(claro)"}</Text>
+            <View style={styles.temaFila}>
+              {(["auto", "claro", "oscuro"] as PreferenciaTema[]).map((op) => {
+                const activo = preferenciaTema === op;
+                return (
+                  <TouchableOpacity
+                    key={op}
+                    style={[styles.temaBoton, activo && styles.temaBotonActivo]}
+                    onPress={() => !activo && guardarPreferenciaTema(op)}
+                  >
+                    <Text style={[styles.temaTexto, activo && styles.temaTextoActivo]}>
+                      {op === "auto" ? "Auto" : op === "claro" ? "Claro" : "Oscuro"}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
       </Animated.View>
     </View>
   );
@@ -135,4 +157,11 @@ const styles = StyleSheet.create({
   subItemRowActivo: { backgroundColor: colors.primaryLight },
   subItemLabel: { fontSize: 13, color: colors.textMuted },
   subItemLabelActivo: { color: colors.primary, fontWeight: "700" },
+  temaWrap: { position: "absolute", left: spacing.lg, right: spacing.lg, bottom: spacing.xl, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md },
+  temaTitulo: { fontSize: 12, color: colors.textMuted, fontWeight: "600", marginBottom: 6 },
+  temaFila: { flexDirection: "row", gap: 6 },
+  temaBoton: { flex: 1, paddingVertical: 8, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
+  temaBotonActivo: { backgroundColor: colors.primary, borderColor: colors.primary },
+  temaTexto: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
+  temaTextoActivo: { color: colors.white },
 });

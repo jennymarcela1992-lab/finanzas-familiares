@@ -20,6 +20,7 @@ import { useAuth } from "../hooks/useAuth";
 import { colors, spacing } from "../theme/theme";
 import SideMenu, { EntradaMenu } from "../components/SideMenu";
 import RealtimeBanner from "../components/RealtimeBanner";
+import Bienvenida from "../components/Bienvenida";
 
 const Stack = createNativeStackNavigator();
 
@@ -123,6 +124,7 @@ function HomeShell() {
       />
 
       <RealtimeBanner />
+      <Bienvenida />
     </View>
   );
 }
@@ -171,7 +173,7 @@ export default function AppNavigator() {
 
   if (cargando) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.primary }}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.hero }}>
         <ActivityIndicator size="large" color="#fff" />
       </View>
     );
@@ -189,11 +191,11 @@ export default function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
-  topBar: { flexDirection: "row", alignItems: "center", backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  topBar: { flexDirection: "row", alignItems: "center", backgroundColor: colors.hero, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   menuButton: { marginRight: spacing.md, padding: 2 },
   menuIconTexto: { fontSize: 20, color: colors.white, fontWeight: "700" },
   topBarTitle: { color: colors.white, fontSize: 17, fontWeight: "700" },
-  bloqueoContainer: { flex: 1, backgroundColor: colors.primary, justifyContent: "center", alignItems: "center", padding: spacing.xl },
+  bloqueoContainer: { flex: 1, backgroundColor: colors.hero, justifyContent: "center", alignItems: "center", padding: spacing.xl },
   bloqueoIcono: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center", marginBottom: spacing.lg },
   bloqueoTitulo: { color: colors.white, fontSize: 20, fontWeight: "800", marginBottom: 6 },
   bloqueoSubtitulo: { color: "rgba(255,255,255,0.75)", fontSize: 13, marginBottom: spacing.xl, textAlign: "center" },
