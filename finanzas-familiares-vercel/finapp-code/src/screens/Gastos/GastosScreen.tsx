@@ -258,7 +258,7 @@ export default function GastosScreen() {
     const coincideRubro = !filtroRubro || g.rubro === filtroRubro;
     const coincideMes = verPapelera || !filtroMes || g.fecha.slice(0, 7) === filtroMes;
     const coincidePersona = verPapelera || !filtroPersona || (g.usuario_pago_nombre ?? "") === filtroPersona;
-    const esFijo = !!(g as any).recurrente_id;
+    const esFijo = !!(g as any).recurrente_id || !!g.deuda_id; // fijos = automáticos + pagos de créditos
     const coincideTipo = verPapelera || !filtroTipo || (filtroTipo === "fijos" ? esFijo : !esFijo);
     return coincideBusqueda && coincideRubro && coincideMes && coincidePersona && coincideTipo;
   });
@@ -398,7 +398,7 @@ export default function GastosScreen() {
             <Text style={[styles.chipText, !filtroTipo && styles.chipTextActivo]}>Fijos y otros</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.chip, filtroTipo === "fijos" && styles.chipActivo]} onPress={() => setFiltroTipo(filtroTipo === "fijos" ? null : "fijos")}>
-            <Text style={[styles.chipText, filtroTipo === "fijos" && styles.chipTextActivo]}>Solo fijos (automáticos)</Text>
+            <Text style={[styles.chipText, filtroTipo === "fijos" && styles.chipTextActivo]}>Solo fijos (automáticos y créditos)</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.chip, filtroTipo === "otros" && styles.chipActivo]} onPress={() => setFiltroTipo(filtroTipo === "otros" ? null : "otros")}>
             <Text style={[styles.chipText, filtroTipo === "otros" && styles.chipTextActivo]}>Solo los demás</Text>
