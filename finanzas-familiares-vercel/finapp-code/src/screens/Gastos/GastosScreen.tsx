@@ -358,54 +358,74 @@ export default function GastosScreen() {
       )}
 
       {!verPapelera && (
-        <View style={styles.chipsRowFiltro}>
-          <TouchableOpacity style={[styles.chip, !filtroRubro && styles.chipActivo]} onPress={() => setFiltroRubro(null)}>
-            <Text style={[styles.chipText, !filtroRubro && styles.chipTextActivo]}>Todos</Text>
-          </TouchableOpacity>
-          {RUBROS.map((r) => (
-            <TouchableOpacity key={r} style={[styles.chip, filtroRubro === r && styles.chipActivo]} onPress={() => setFiltroRubro(filtroRubro === r ? null : r)}>
-              <Text style={[styles.chipText, filtroRubro === r && styles.chipTextActivo]}>{r}</Text>
+        <View style={styles.panelFiltros}>
+          <View style={styles.panelFiltrosTop}>
+            <Text style={styles.panelFiltrosTitulo}>🔎 Filtrar los gastos</Text>
+            {(!!filtroMes || !!filtroPersona || !!filtroTipo || !!filtroRubro) && (
+              <TouchableOpacity
+                onPress={() => {
+                  setFiltroMes(null);
+                  setFiltroPersona(null);
+                  setFiltroTipo(null);
+                  setFiltroRubro(null);
+                }}
+              >
+                <Text style={styles.limpiar}>Quitar filtros</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <Text style={styles.filtroEtiqueta}>MES</Text>
+          <View style={styles.filtroFila}>
+            <TouchableOpacity style={styles.chip} onPress={() => moverMes(-1)}>
+              <Text style={styles.chipText}>‹</Text>
             </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {!verPapelera && (
-        <View style={styles.chipsRowFiltro}>
-          <TouchableOpacity style={styles.chip} onPress={() => moverMes(-1)}>
-            <Text style={styles.chipText}>‹</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.chip, !!filtroMes && styles.chipActivo]} onPress={() => setFiltroMes(filtroMes ? null : hoyISO().slice(0, 7))}>
-            <Text style={[styles.chipText, !!filtroMes && styles.chipTextActivo]}>{filtroMes ? etiquetaMes(filtroMes) : "Todos los meses"}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.chip} onPress={() => moverMes(1)}>
-            <Text style={styles.chipText}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.chip, !filtroPersona && styles.chipActivo]} onPress={() => setFiltroPersona(null)}>
-            <Text style={[styles.chipText, !filtroPersona && styles.chipTextActivo]}>Todos</Text>
-          </TouchableOpacity>
-          {personas.map((p) => (
-            <TouchableOpacity key={p} style={[styles.chip, filtroPersona === p && styles.chipActivo]} onPress={() => setFiltroPersona(filtroPersona === p ? null : p)}>
-              <Text style={[styles.chipText, filtroPersona === p && styles.chipTextActivo]}>{p}</Text>
+            <TouchableOpacity style={[styles.chip, !!filtroMes && styles.chipActivo]} onPress={() => setFiltroMes(filtroMes ? null : hoyISO().slice(0, 7))}>
+              <Text style={[styles.chipText, !!filtroMes && styles.chipTextActivo]}>{filtroMes ? etiquetaMes(filtroMes) : "Todos los meses"}</Text>
             </TouchableOpacity>
-          ))}
+            <TouchableOpacity style={styles.chip} onPress={() => moverMes(1)}>
+              <Text style={styles.chipText}>›</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.filtroEtiqueta}>QUIÉN PAGÓ</Text>
+          <View style={styles.filtroFila}>
+            <TouchableOpacity style={[styles.chip, !filtroPersona && styles.chipActivo]} onPress={() => setFiltroPersona(null)}>
+              <Text style={[styles.chipText, !filtroPersona && styles.chipTextActivo]}>Todos</Text>
+            </TouchableOpacity>
+            {personas.map((p) => (
+              <TouchableOpacity key={p} style={[styles.chip, filtroPersona === p && styles.chipActivo]} onPress={() => setFiltroPersona(filtroPersona === p ? null : p)}>
+                <Text style={[styles.chipText, filtroPersona === p && styles.chipTextActivo]}>{p}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.filtroEtiqueta}>TIPO</Text>
+          <View style={styles.filtroFila}>
+            <TouchableOpacity style={[styles.chip, !filtroTipo && styles.chipActivo]} onPress={() => setFiltroTipo(null)}>
+              <Text style={[styles.chipText, !filtroTipo && styles.chipTextActivo]}>Todos</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.chip, filtroTipo === "fijos" && styles.chipActivo]} onPress={() => setFiltroTipo(filtroTipo === "fijos" ? null : "fijos")}>
+              <Text style={[styles.chipText, filtroTipo === "fijos" && styles.chipTextActivo]}>Fijos (automáticos y créditos)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.chip, filtroTipo === "otros" && styles.chipActivo]} onPress={() => setFiltroTipo(filtroTipo === "otros" ? null : "otros")}>
+              <Text style={[styles.chipText, filtroTipo === "otros" && styles.chipTextActivo]}>Los demás</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.filtroEtiqueta}>RUBRO</Text>
+          <View style={styles.filtroFila}>
+            <TouchableOpacity style={[styles.chip, !filtroRubro && styles.chipActivo]} onPress={() => setFiltroRubro(null)}>
+              <Text style={[styles.chipText, !filtroRubro && styles.chipTextActivo]}>Todos</Text>
+            </TouchableOpacity>
+            {RUBROS.map((r) => (
+              <TouchableOpacity key={r} style={[styles.chip, filtroRubro === r && styles.chipActivo]} onPress={() => setFiltroRubro(filtroRubro === r ? null : r)}>
+                <Text style={[styles.chipText, filtroRubro === r && styles.chipTextActivo]}>{r}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
       )}
-
-      {!verPapelera && (
-        <View style={styles.chipsRowFiltro}>
-          <TouchableOpacity style={[styles.chip, !filtroTipo && styles.chipActivo]} onPress={() => setFiltroTipo(null)}>
-            <Text style={[styles.chipText, !filtroTipo && styles.chipTextActivo]}>Fijos y otros</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.chip, filtroTipo === "fijos" && styles.chipActivo]} onPress={() => setFiltroTipo(filtroTipo === "fijos" ? null : "fijos")}>
-            <Text style={[styles.chipText, filtroTipo === "fijos" && styles.chipTextActivo]}>Solo fijos (automáticos y créditos)</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.chip, filtroTipo === "otros" && styles.chipActivo]} onPress={() => setFiltroTipo(filtroTipo === "otros" ? null : "otros")}>
-            <Text style={[styles.chipText, filtroTipo === "otros" && styles.chipTextActivo]}>Solo los demás</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       {!verPapelera && listaFiltrada.length > 0 && (
         <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.sm }}>
           <Text style={styles.pista}>
@@ -799,6 +819,12 @@ const styles = StyleSheet.create({
   tDer: { textAlign: "right" },
   tNeg: { fontWeight: "700" },
   tTotal: { backgroundColor: colors.primaryLight, borderBottomWidth: 0 },
+  panelFiltros: { marginHorizontal: spacing.lg, marginBottom: spacing.md, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  panelFiltrosTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2 },
+  panelFiltrosTitulo: { fontSize: 14, fontWeight: "800", color: colors.textPrimary },
+  limpiar: { fontSize: 12, fontWeight: "700", color: colors.accent },
+  filtroEtiqueta: { fontSize: 10, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginTop: spacing.sm, marginBottom: 4 },
+  filtroFila: { flexDirection: "row", flexWrap: "wrap", alignItems: "center" },
   chipsRowFiltro: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
   restaurarBoton: { marginLeft: spacing.sm, padding: 6 },
   historialTexto: { fontSize: 11, color: colors.danger, marginTop: 2, fontStyle: "italic" },
