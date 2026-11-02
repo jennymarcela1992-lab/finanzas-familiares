@@ -5,6 +5,7 @@ import { useDeudas, DeudaConCuotas, CuotaRow, AbonoRow, DatosDeuda } from "../..
 import { usePersonas } from "../../hooks/usePersonas";
 import { useActivos } from "../../hooks/useActivos";
 import { PagoDeudaRow, pagosDeCuota, origenTexto } from "../../utils/pagosDeuda";
+import { LA_CASA } from "../../utils/aportes";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import ProgressBar from "../../components/ProgressBar";
@@ -855,13 +856,13 @@ function FormPago({
         <>
           <Text style={styles.label}>¿Quién pagó?</Text>
           <View style={styles.chips}>
-            {(personas.length ? personas : [yo]).filter(Boolean).map((p) => (
+            {[...(personas.length ? personas : [yo]).filter(Boolean), LA_CASA].map((p) => (
               <TouchableOpacity key={p} onPress={() => setPersona(p)} style={[styles.chip, persona === p && styles.chipActivo]}>
                 <Text style={[styles.chipTexto, persona === p && styles.chipTextoActivo]}>{p}</Text>
               </TouchableOpacity>
             ))}
           </View>
-          <Text style={[styles.ayuda, { marginTop: 4 }]}>Si la pagó un arriendo, regístralo en Propiedades y elige este crédito como destino.</Text>
+          <Text style={[styles.ayuda, { marginTop: 4 }]}>Si se pagó con plata de la casa (por ejemplo el ingreso del carro), elige «La casa»: no cuenta como aporte de ninguna persona. Si la pagó un arriendo, regístralo en Propiedades y elige este crédito como destino.</Text>
         </>
       )}
       <Text style={styles.label}>Valor pagado</Text>
@@ -1044,7 +1045,7 @@ function FormAbono({
             <View>
               <Text style={styles.label}>¿Quién pagó?</Text>
               <View style={styles.chips}>
-                {(personas.length ? personas : [yo]).filter(Boolean).map((p) => (
+                {[...(personas.length ? personas : [yo]).filter(Boolean), LA_CASA].map((p) => (
                   <TouchableOpacity key={p} onPress={() => setPersona(p)} style={[styles.chip, persona === p && styles.chipActivo]}>
                     <Text style={[styles.chipTexto, persona === p && styles.chipTextoActivo]}>{p}</Text>
                   </TouchableOpacity>
