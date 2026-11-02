@@ -83,6 +83,7 @@ export interface DatosDashboard {
 }
 
 const mesDe = (fecha: string) => String(fecha).slice(0, 7);
+const sinTildes = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 export const mesHoy = () => hoyISO().slice(0, 7);
 export const moverMes = (mes: string, n: number) => sumarMeses(`${mes}-01`, n).slice(0, 7);
 
@@ -385,7 +386,7 @@ async function armarPresupuesto(mes: string, cuotas: any[], deudasInfo: Map<stri
   // 2. Gastos automáticos activos en el mes
   const [rRec, rGR] = await Promise.all([
     supabase.from("gastos_recurrentes").select("*").eq("activo", true),
-    supabase.from("gastos").select("recurrente_id, valor, valor_cop, fecha, borrado").gte("fecha", inicio).lte("fecha", fin).not("recurrente_id", "is", null),
+    supabase.from("gastos").select("recurrente_id, item, valor, valor_cop, fecha, borrado").gte("fecha", inicio).lte("fecha", fin),
   ]);
   const gastosRec = ((rGR.error ? [] : rGR.data) ?? []).filter((g: any) => !g.borrado) as any[];
   ((rRec.error ? [] : rRec.data) ?? []).forEach((r: any) => {
@@ -394,7 +395,11 @@ async function armarPresupuesto(mes: string, cuotas: any[], deudasInfo: Map<stri
     const ultimo = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)), 0)).getUTCDate();
     const dia = Math.min(Number(r.dia) || 1, ultimo);
     const valor = Number(r.valor);
-    const pagado = gastosRec.filter((g) => g.recurrente_id === r.id).reduce((s, g) => s + Number(g.valor_cop ?? g.valor), 0);
+    // cuenta como pagado el gasto que generó el automático y también cualquiera del mes con el mismo nombre (anotado a mano, o de un automático que se volvió a crear)
+    const nombre = sinTildes(String(r.item ?? ""));
+    const pagado = gastosRec
+      .filter((g) => g.recurrente_id === r.id || (nombre && sinTildes(String(g.item ?? "")) === nombre))
+      .reduce((s, g) => s + Number(g.valor_cop ?? g.valor), 0);
     items.push({
       tipo: r.rubro === "Créditos" ? "credito" : "automatico", // un pago automático de crédito se ve junto a los créditos
       nombre: r.item,
