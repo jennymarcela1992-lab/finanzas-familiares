@@ -12,6 +12,8 @@ import { colors, spacing, typography, radius, esOscuro } from "../../theme/theme
 import { pesos } from "../../utils/amortizacion";
 import { descargarXlsx, Hoja } from "../../utils/xlsx";
 import { mesCerrado, cerrarMes, reabrirMes, MesCerrado } from "../../utils/cierreMes";
+import { calcularCuentas, nombreCanonico, LA_CASA } from "../../utils/aportes";
+import { USAR_APORTES } from "../../config/hogar";
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const nombreMes = (mes: string) => `${MESES[Number(mes.slice(5, 7)) - 1]} ${mes.slice(0, 4)}`;
@@ -151,12 +153,25 @@ export default function InformeMesScreen() {
   const a = datos?.actual;
   const ant = datos?.anterior;
 
+  // ---------- Cuentas entre las personas: se suma lo que pagó cada una ----------
+  const cuentas = useMemo(() => {
+    if (!datos) return null;
+    const personas = datos.aportesPersonas.map((p) => p.nombre);
+    const canon = (n: string) => nombreCanonico(n, personas);
+    const pagadoPor = new Map<string, number>(personas.map((n) => [n, 0]));
+    gastos
+      .filter((g) => g.compartido && g.pago && g.pago !== LA_CASA)
+      .forEach((g) => pagadoPor.set(canon(g.pago), (pagadoPor.get(canon(g.pago)) ?? 0) + g.valor));
+    return { ...calcularCuentas([...pagadoPor.entries()].map(([nombre, pagado]) => ({ nombre, pagado }))), canon };
+  }, [datos, gastos]);
+
   // ---------- Observaciones ----------
   const observaciones = useMemo<Obs[]>(() => {
     if (!datos || !a) return [];
     const obs: Obs[] = [];
     const totalGastos = datos.rubros.reduce((s, r) => s + r.valor, 0);
     if (a.balance >= 0) obs.push({ nivel: "ok", texto: `El mes cierra con saldo a favor de ${pesos(a.balance)}.` });
+    else if (!USAR_APORTES) obs.push({ nivel: "aviso", texto: `Salió ${pesos(-a.balance)} más de lo que entró por arriendos, carro e inversiones. Esa diferencia la cubren las personas con su propio dinero (ver «Cuentas entre ustedes»).` });
     else obs.push({ nivel: "aviso", texto: `El mes cierra con déficit de ${pesos(-a.balance)}: salió más plata de la que entró.` });
     if (ant && ant.mes !== a.mes) {
       const d = a.balance - ant.balance;
@@ -265,7 +280,7 @@ export default function InformeMesScreen() {
         [cierre ? `Mes CERRADO el ${String(cierre.cerrado_en ?? "").slice(0, 10)}` : "Mes abierto"],
         [],
         [H("INGRESOS"), H("Valor")],
-        ["Aportes de las personas", D(a.aportes)],
+        ...(USAR_APORTES ? [["Aportes de las personas", D(a.aportes)]] : []),
         ["Arriendos recibidos", D(a.arriendos)],
         ["Carro rentado", D(a.vehiculo)],
         ["Inversiones en conjunto", D(a.inversiones)],
@@ -281,6 +296,10 @@ export default function InformeMesScreen() {
         [],
         [N("SALDO DEL MES"), DN(a.balance)],
         [],
+        [H("CUENTAS ENTRE USTEDES"), H("Pagó"), H("Le corresponde"), H("Diferencia")],
+        ...(cuentas ? cuentas.filas.map((f) => [f.nombre, D(f.pagado), D(cuentas.parte), D(f.diferencia)]) : []),
+        ...(cuentas ? cuentas.transferencias.map((t) => [N(`${t.de} le debe a ${t.a}`), DN(t.valor)]) : []),
+        [],
         [H("GASTOS POR RUBRO"), H("Valor"), H("% del total"), H("Mes anterior"), H("Cambio")],
         ...datos.rubros.map((r) => {
           const antes = datos.rubrosAnterior[r.etiqueta] ?? 0;
@@ -294,7 +313,7 @@ export default function InformeMesScreen() {
       anchos: [34, 52, 18],
       filas: [
         [H("Origen"), H("Detalle"), H("Valor")],
-        ...datos.aportesPersonas.map((p) => ["Aporte de " + p.nombre, p.esBase ? "Aporte base" : "Aporte ajustado", D(p.aporte)]),
+        ...(USAR_APORTES ? datos.aportesPersonas.map((p) => ["Aporte de " + p.nombre, p.esBase ? "Aporte base" : "Aporte ajustado", D(p.aporte)]) : []),
         ...detalle.arriendos.map((l) => ["Arriendo · " + l.titulo, l.sub, D(l.valor)]),
         ...detalle.vehiculo.map((l) => ["Carro rentado · " + l.titulo, l.sub, D(l.valor)]),
         ...detalle.inversiones.map((l) => ["Inversión · " + l.titulo, l.sub, D(l.valor)]),
@@ -541,6 +560,45 @@ export default function InformeMesScreen() {
             <Kpi titulo="Patrimonio neto" valor={corto(patrimonio)} nota="propiedades + vehículos + ahorros − deuda" color={patrimonio < 0 ? colors.danger : undefined} />
           </View>
 
+          {/* 2b. Cuentas entre ustedes */}
+          {cuentas && (
+            <Card>
+              <Text style={typography.h3}>Cuentas entre ustedes</Text>
+              <Text style={styles.ayuda}>Se suma todo lo que pagó cada persona de su bolsillo en gastos compartidos (los pagos de créditos incluidos; lo que pagó «La casa» no cuenta). Toca una persona para ver qué pagó.</Text>
+              {cuentas.filas.map((f) => (
+                <Desplegable
+                  key={f.nombre}
+                  clave={`c-${f.nombre}`}
+                  titulo={`${f.nombre} pagó`}
+                  valor={f.pagado}
+                  lineas={gastos
+                    .filter((g) => g.compartido && g.pago && g.pago !== LA_CASA && cuentas.canon(g.pago) === f.nombre)
+                    .sort((x, y) => y.valor - x.valor)
+                    .map((g) => ({ titulo: g.item || "(sin nombre)", sub: `${g.fecha} · ${g.rubro}${g.esCredito ? " · pago de crédito" : ""}`, valor: g.valor }))}
+                />
+              ))}
+              <View style={[styles.fila, { borderTopColor: colors.textMuted }]}>
+                <Text style={[styles.filaTexto, { fontWeight: "800" }]}>Total pagado por las personas</Text>
+                <Text style={styles.filaValor}>{pesos(cuentas.total)}</Text>
+              </View>
+              <View style={styles.cuentaResultado}>
+                <Ionicons name={cuentas.transferencias.length ? "swap-horizontal" : "checkmark-circle"} size={22} color={cuentas.transferencias.length ? colors.warning : colors.success} />
+                <View style={{ flex: 1 }}>
+                  {cuentas.transferencias.length === 0 ? (
+                    <Text style={styles.cuentaTexto}>Están a mano: cada uno pagó lo que le correspondía.</Text>
+                  ) : (
+                    cuentas.transferencias.map((t, k) => (
+                      <Text key={k} style={styles.cuentaTexto}>
+                        {t.de} le debe a {t.a} {pesos(t.valor)}
+                      </Text>
+                    ))
+                  )}
+                  <Text style={typography.caption}>A cada uno le corresponde poner {pesos(cuentas.parte)} (mitad por persona).</Text>
+                </View>
+              </View>
+            </Card>
+          )}
+
           {/* 3. Tendencia */}
           <Card>
             <Text style={typography.h3}>Últimos 6 meses</Text>
@@ -616,7 +674,7 @@ export default function InformeMesScreen() {
           <Text style={styles.seccion}>Detalle (toca cada línea)</Text>
           <Card>
             <Text style={typography.h3}>Lo que entró</Text>
-            <Desplegable clave="i-aportes" titulo="Aportes de las personas" valor={a.aportes} lineas={datos.aportesPersonas.map((p) => ({ titulo: p.nombre, sub: p.esBase ? "Aporte base" : "Aporte ajustado este mes", valor: p.aporte }))} />
+            {USAR_APORTES && <Desplegable clave="i-aportes" titulo="Aportes de las personas" valor={a.aportes} lineas={datos.aportesPersonas.map((p) => ({ titulo: p.nombre, sub: p.esBase ? "Aporte base" : "Aporte ajustado este mes", valor: p.aporte }))} />}
             <Desplegable clave="i-arr" titulo="Arriendos recibidos" valor={a.arriendos} lineas={detalle.arriendos} />
             <Desplegable clave="i-veh" titulo="Carro rentado" valor={a.vehiculo} lineas={detalle.vehiculo} />
             <Desplegable clave="i-inv" titulo="Inversiones en conjunto" valor={a.inversiones} lineas={detalle.inversiones} />
@@ -735,6 +793,8 @@ const styles = StyleSheet.create({
   saldoEtiqueta: { fontSize: 10, fontWeight: "700", marginTop: 1 },
   detalleBox: { backgroundColor: colors.infoBg, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 8 },
   detalleFila: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 7 },
+  cuentaResultado: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: spacing.sm, backgroundColor: colors.infoBg, borderRadius: radius.sm, padding: spacing.md },
+  cuentaTexto: { fontSize: 15, fontWeight: "800", color: colors.textPrimary },
   grupoCredito: { borderTopWidth: 1, borderTopColor: colors.border },
   pagoCredito: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6, paddingLeft: 26, paddingRight: 4, backgroundColor: colors.surface, borderRadius: 6, marginBottom: 4 },
   detalleTitulo: { fontSize: 13, fontWeight: "600", color: colors.textPrimary },

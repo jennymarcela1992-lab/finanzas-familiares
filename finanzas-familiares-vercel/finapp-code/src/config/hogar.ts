@@ -2,3 +2,9 @@
 
 /** Lo que cada persona aporta al mes si no se ha ajustado otro valor para ese mes. */
 export const APORTE_BASE = 3_000_000;
+
+/**
+ * false = no hay aportes fijos (quedan en cero). En su lugar se suma lo que pagó cada persona
+ * y se calcula quién le debe a quién («Cuentas entre ustedes»). true = vuelve el sistema de aportes.
+ */
+export const USAR_APORTES = false;

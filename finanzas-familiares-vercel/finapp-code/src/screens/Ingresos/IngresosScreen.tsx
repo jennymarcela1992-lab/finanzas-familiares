@@ -10,7 +10,7 @@ import Card from "../../components/Card";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
 import { pesos } from "../../utils/amortizacion";
-import { APORTE_BASE } from "../../config/hogar";
+import { APORTE_BASE, USAR_APORTES } from "../../config/hogar";
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const nombreMes = (mes: string) => `${MESES[Number(mes.slice(5, 7)) - 1]} ${mes.slice(0, 4)}`;
@@ -88,7 +88,9 @@ export default function IngresosScreen() {
           <Card>
             <Text style={typography.h3}>Aportes de cada persona</Text>
             <Text style={styles.ayuda}>
-              Cada persona aporta {pesos(APORTE_BASE)} al mes (cada uno por separado), salvo que lo ajuste. El ajuste solo cambia el mes que estás viendo.
+              {USAR_APORTES
+                ? `Cada persona aporta ${pesos(APORTE_BASE)} al mes (cada uno por separado), salvo que lo ajuste. El ajuste solo cambia el mes que estás viendo.`
+                : "Los aportes fijos están en cero. En su lugar se suma lo que pagó cada persona y se calcula quién le debe a quién: míralo en «Informe del mes» → Cuentas entre ustedes."}
             </Text>
             {datos.aportesPersonas.length === 0 && <Text style={typography.body}>No hay personas registradas.</Text>}
             {datos.aportesPersonas.map((p) => (
@@ -104,7 +106,7 @@ export default function IngresosScreen() {
                   <Text style={styles.monto}>{pesos(p.aporte)}</Text>
                 </View>
 
-                {editando === p.nombre ? (
+                {!USAR_APORTES ? null : editando === p.nombre ? (
                   <View style={styles.editarFila}>
                     <TextInput
                       style={styles.input}
@@ -144,7 +146,7 @@ export default function IngresosScreen() {
                 )}
               </View>
             ))}
-            {agregando ? (
+            {!USAR_APORTES ? null : agregando ? (
               <View style={styles.editarFila}>
                 <TextInput
                   style={styles.input}

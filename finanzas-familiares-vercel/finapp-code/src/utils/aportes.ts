@@ -1,5 +1,5 @@
 import { supabase } from "../config/supabase";
-import { APORTE_BASE } from "../config/hogar";
+import { APORTE_BASE, USAR_APORTES } from "../config/hogar";
 
 /** Pagos hechos con plata de la casa (ingreso del carro, arriendos...): no cuentan como aporte de ninguna persona. */
 export const LA_CASA = "La casa";
@@ -84,6 +84,7 @@ export function aportesDelMes(
 ): AportePersona[] {
   const delMes = filas.filter((f) => f.mes === mes);
   const nombres = new Set([...personas, ...delMes.map((f) => f.usuario_nombre)]);
+  if (!USAR_APORTES) return Array.from(nombres).map((nombre) => ({ nombre, aporte: 0, esBase: true })); // sin aportes fijos: todo en cero
   const usarBase = !mesInicio || mes >= mesInicio;
   return Array.from(nombres).map((nombre) => {
     const fila = delMes.find((f) => f.usuario_nombre === nombre);
@@ -97,4 +98,37 @@ const normal = (s: string) => s.trim().toLowerCase();
 export function esDelHogar(nombre: string, personas: string[]): boolean {
   const n = normal(nombre);
   return personas.some((p) => normal(p) === n || normal(p).split(" ")[0] === n.split(" ")[0]);
+}
+
+
+export interface FilaCuenta {
+  nombre: string;
+  pagado: number; // lo que pagó de su bolsillo en gastos compartidos (incluye pagos de créditos)
+  diferencia: number; // pagado - parte justa: positivo = le deben, negativo = debe
+}
+export interface Cuentas {
+  total: number;
+  parte: number; // lo que le corresponde a cada uno si todo se reparte por igual
+  filas: FilaCuenta[];
+  transferencias: { de: string; a: string; valor: number }[];
+}
+
+/** Suma lo que pagó cada persona y calcula quién le debe a quién para quedar parejos. */
+export function calcularCuentas(pagos: { nombre: string; pagado: number }[]): Cuentas {
+  const total = pagos.reduce((s, p) => s + p.pagado, 0);
+  const parte = pagos.length ? total / pagos.length : 0;
+  const filas = pagos.map((p) => ({ nombre: p.nombre, pagado: p.pagado, diferencia: Math.round(p.pagado - parte) }));
+  const deben = filas.filter((f) => f.diferencia < 0).map((f) => ({ ...f, resta: -f.diferencia }));
+  const reciben = filas.filter((f) => f.diferencia > 0).map((f) => ({ ...f, resta: f.diferencia }));
+  const transferencias: Cuentas["transferencias"] = [];
+  for (const d of deben) {
+    for (const r of reciben) {
+      if (d.resta <= 0) break;
+      const v = Math.min(d.resta, r.resta);
+      if (v >= 1) transferencias.push({ de: d.nombre, a: r.nombre, valor: Math.round(v) });
+      d.resta -= v;
+      r.resta -= v;
+    }
+  }
+  return { total, parte, filas, transferencias };
 }

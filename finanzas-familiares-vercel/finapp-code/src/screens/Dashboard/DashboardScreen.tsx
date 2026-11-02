@@ -4,6 +4,8 @@ import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useCierreMensual } from "../../hooks/useCierreMensual";
+import { USAR_APORTES } from "../../config/hogar";
+import { calcularCuentas } from "../../utils/aportes";
 import { useAhorros } from "../../hooks/useAhorros";
 import { useAuth } from "../../hooks/useAuth";
 import { useVehiculos } from "../../hooks/useVehiculos";
@@ -320,8 +322,29 @@ export default function DashboardScreen() {
         )}
       </Card>
 
+      {/* ---------- 6a. Cuentas entre ustedes (sin aportes fijos) ---------- */}
+      {resumen && !USAR_APORTES && (() => {
+        const c = calcularCuentas(resumen.personas.map((p) => ({ nombre: p.usuarioNombre, pagado: p.pagado })));
+        return (
+          <Card>
+            <Text style={typography.h3}>Cuentas entre ustedes</Text>
+            <Text style={typography.caption}>Lo que pagó cada uno en gastos compartidos en {nombreMesSolo(mes)} (créditos incluidos)</Text>
+            {c.filas.map((f) => (
+              <View key={f.nombre} style={[styles.rowBetween, { paddingVertical: 6 }]}>
+                <Text style={typography.body}>{f.nombre}</Text>
+                <Text style={typography.h3}>{pesos(f.pagado)}</Text>
+              </View>
+            ))}
+            <Text style={[typography.body, { fontWeight: "700", marginTop: spacing.sm }]}>
+              {c.transferencias.length === 0 ? "Están a mano." : c.transferencias.map((t) => `${t.de} le debe a ${t.a} ${pesos(t.valor)}`).join(" · ")}
+            </Text>
+            <Text style={typography.caption}>Cada uno debería poner {pesos(c.parte)}. El detalle está en «Informe del mes».</Text>
+          </Card>
+        );
+      })()}
+
       {/* ---------- 6. Aportes del hogar (cierre del mes) ---------- */}
-      {resumen && (
+      {resumen && USAR_APORTES && (
         <Card>
           <TouchableOpacity onPress={() => setVerAportes(!verAportes)} style={styles.tituloFila}>
             <View>
