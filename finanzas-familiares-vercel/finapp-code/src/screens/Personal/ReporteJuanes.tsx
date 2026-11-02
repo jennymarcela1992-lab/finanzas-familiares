@@ -54,6 +54,7 @@ export default function ReporteJuanes() {
   const [nConcepto, setNConcepto] = useState("");
   const [nValor, setNValor] = useState("");
   const [nNota, setNNota] = useState("");
+  const [nArchivo, setNArchivo] = useState<File | null>(null);
   const [subiendo, setSubiendo] = useState<string | null>(null);
   const [armando, setArmando] = useState(false);
   const [subiendoLibro, setSubiendoLibro] = useState(false);
@@ -121,7 +122,9 @@ export default function ReporteJuanes() {
     if (!nConcepto.trim()) return Alert.alert("Falta el concepto", "Ej.: Pensión del colegio, Cita médica, Uniforme.");
     if (!(v > 0)) return Alert.alert("Falta el valor", "Escribe el valor TOTAL del gasto (la app calcula la parte de Juan Carlos).");
     try {
-      await r.agregarLinea(nConcepto, v, nNota);
+      const id = await r.agregarLinea(nConcepto, v, nNota);
+      if (nArchivo) await r.subirSoporte(`m-${id}`, nArchivo);
+      setNArchivo(null);
       setNConcepto("");
       setNValor("");
       setNNota("");
@@ -357,7 +360,7 @@ export default function ReporteJuanes() {
                 {sinSoporte.length ? `${r.incluidas.length - sinSoporte.length} de ${r.incluidas.length} gastos con soporte · faltan ${sinSoporte.length}` : `Los ${r.incluidas.length} gastos tienen soporte`}
               </Text>
             )}
-            {grupos.length === 0 && <Text style={[typography.caption, { marginTop: 6 }]}>Este mes todavía no hay gastos que coincidan. Registra los gastos en Gastos (rubro Juanes, o que digan ruta/onces) o agrégalos a mano abajo.</Text>}
+            {grupos.length === 0 && <Text style={[typography.caption, { marginTop: 6 }]}>Este mes todavía no hay gastos en el reporte. Para subir una factura primero necesita existir el gasto: regístralo en Gastos (rubro Juanes, o que diga ruta/onces) o toca «Agregar otro gasto a mano» aquí abajo, donde también puedes adjuntar la factura.</Text>}
             {grupos.map(([concepto, items]) => {
               const sub = items.filter((l) => !r.excluidas.has(l.clave)).reduce((s, l) => s + l.valor, 0);
               return (
@@ -417,6 +420,10 @@ export default function ReporteJuanes() {
                 <TextInput style={styles.input} placeholder="Concepto (ej. Pensión colegio, Cita médica)" placeholderTextColor={colors.textMuted} value={nConcepto} onChangeText={setNConcepto} />
                 <TextInput style={styles.input} placeholder="Valor TOTAL del gasto" placeholderTextColor={colors.textMuted} value={nValor} onChangeText={setNValor} keyboardType="numeric" />
                 <TextInput style={styles.input} placeholder="Nota (opcional)" placeholderTextColor={colors.textMuted} value={nNota} onChangeText={setNNota} />
+                <TouchableOpacity style={[styles.botonBorde, { marginBottom: spacing.sm }]} onPress={async () => setNArchivo((await elegirArchivo()) ?? nArchivo)}>
+                  <Ionicons name="attach" size={18} color={colors.primary} />
+                  <Text style={styles.botonBordeTexto} numberOfLines={1}>{nArchivo ? `Soporte: ${nArchivo.name}` : "Adjuntar factura / foto / PDF"}</Text>
+                </TouchableOpacity>
                 <PrimaryButton title="Agregar al reporte" onPress={agregar} />
                 <TouchableOpacity onPress={() => setAgregando(false)} style={styles.salir}>
                   <Text style={{ textAlign: "center", color: colors.textPrimary, fontWeight: "600" }}>Salir sin guardar</Text>

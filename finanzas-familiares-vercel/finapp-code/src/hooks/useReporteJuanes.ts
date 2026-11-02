@@ -170,9 +170,10 @@ export function useReporteJuanes(mes: string) {
     const { data: sesion } = await supabase.auth.getUser();
     const uid = sesion.user?.id;
     if (!uid) throw new Error("Tu sesión expiró.");
-    const { error: err } = await supabase.from("reporte_juanes_lineas").insert({ usuario_id: uid, mes, concepto: concepto.trim(), valor_total: valorTotal, nota: nota?.trim() || null });
+    const { data, error: err } = await supabase.from("reporte_juanes_lineas").insert({ usuario_id: uid, mes, concepto: concepto.trim(), valor_total: valorTotal, nota: nota?.trim() || null }).select("id").single();
     if (err) throw err;
     await cargar();
+    return (data as any).id as string;
   }
 
   async function subirSoporte(clave: string, file: File) {
