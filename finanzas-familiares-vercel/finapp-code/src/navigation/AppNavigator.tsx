@@ -11,6 +11,7 @@ import IngresosScreen from "../screens/Ingresos/IngresosScreen";
 import GastosScreen from "../screens/Gastos/GastosScreen";
 import CajaCasaScreen from "../screens/Gastos/CajaCasaScreen";
 import InformeMesScreen from "../screens/Dashboard/InformeMesScreen";
+import MisFinanzasScreen from "../screens/Personal/MisFinanzasScreen";
 import AhorrosScreen from "../screens/Ahorros/AhorrosScreen";
 import DeudasScreen from "../screens/Deudas/DeudasScreen";
 import PrestamosScreen from "../screens/Prestamos/PrestamosScreen";
@@ -32,6 +33,7 @@ const PANTALLAS: Record<string, React.ComponentType<any>> = {
   Gastos: GastosScreen,
   Caja: CajaCasaScreen,
   Informe: InformeMesScreen,
+  MisFinanzas: MisFinanzasScreen,
   Ahorros: AhorrosScreen,
   Deudas: DeudasScreen,
   Prestamos: PrestamosScreen,
@@ -54,6 +56,7 @@ const ENTRADAS_MENU: EntradaMenu[] = [
         { key: "Gastos", label: "Gastos", icon: "cart" },
         { key: "Caja", label: "Caja de la casa", icon: "swap-vertical" },
         { key: "Informe", label: "Informe del mes", icon: "document-text" },
+        { key: "MisFinanzas", label: "Mis finanzas (privado)", icon: "lock-closed" },
       ],
     },
   },
@@ -92,6 +95,7 @@ const TITULOS: Record<string, string> = {
   Gastos: "Gastos",
   Caja: "Caja de la casa",
   Informe: "Informe del mes",
+  MisFinanzas: "Mis finanzas",
   Ahorros: "Ahorros",
   Deudas: "Deudas y créditos",
   Prestamos: "Préstamos",
