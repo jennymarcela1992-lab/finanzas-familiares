@@ -532,15 +532,18 @@ export default function GastosScreen() {
           <Text style={[typography.h3, { marginBottom: spacing.sm }]}>{editando ? "Editar gasto" : "Nuevo gasto"}</Text>
           {editando && (
             <>
-              <View style={styles.switchRow}>
-                <Text style={typography.body}>¿Es pago de un crédito?</Text>
+              <View style={[styles.creditoToggle, esPagoCredito && styles.creditoToggleOn]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.creditoToggleTitulo}>💳 ¿Es pago de un crédito?</Text>
+                  <Text style={styles.creditoToggleSub}>Actívalo si este gasto es una cuota o abono a uno de tus créditos.</Text>
+                </View>
                 <Switch
                   value={esPagoCredito}
                   onValueChange={(v) => {
                     setEsPagoCredito(v);
                     if (!v) setDeudaElegida(null);
                   }}
-                  trackColor={{ true: colors.primary }}
+                  trackColor={{ false: colors.border, true: colors.primary }}
                 />
               </View>
               {esPagoCredito && (
@@ -569,8 +572,11 @@ export default function GastosScreen() {
             </>
           )}
           {!editando && !esAutomatico && (
-          <View style={styles.switchRow}>
-            <Text style={typography.body}>¿Es pago de un crédito?</Text>
+          <View style={[styles.creditoToggle, esPagoCredito && styles.creditoToggleOn]}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.creditoToggleTitulo}>💳 ¿Es pago de un crédito?</Text>
+              <Text style={styles.creditoToggleSub}>Actívalo si este gasto es una cuota o abono a uno de tus créditos.</Text>
+            </View>
             <Switch
               value={esPagoCredito}
               onValueChange={(v) => {
@@ -578,7 +584,7 @@ export default function GastosScreen() {
                 if (v) setEsAutomatico(false); // un pago de crédito no puede ser automático
                 if (!v) setDeudaElegida(null);
               }}
-              trackColor={{ true: colors.primary }}
+              trackColor={{ false: colors.border, true: colors.primary }}
             />
           </View>
           )}
@@ -913,6 +919,14 @@ const styles = StyleSheet.create({
   creditoBox: { backgroundColor: colors.primaryLight, borderRadius: radius.sm, padding: spacing.sm, marginBottom: spacing.sm },
   creditoInfo: { fontSize: 12, color: colors.primary },
   creditoBadge: { fontSize: 11, color: colors.primary, fontWeight: "700", marginTop: 2 },
+  creditoToggle: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.infoBg,
+    borderRadius: 12, padding: 12, marginBottom: spacing.sm,
+  },
+  creditoToggleOn: { borderColor: colors.primary },
+  creditoToggleTitulo: { fontSize: 15, fontWeight: "700", color: colors.textPrimary },
+  creditoToggleSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm, marginTop: 4 },
   gastoCard: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   iconoRubro: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
