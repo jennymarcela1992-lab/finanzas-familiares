@@ -37,7 +37,16 @@ export interface AsignacionRow {
   destino_id: string;
   gasto_id: string | null;
   aporte_ahorro_id: string | null;
+  vinculado?: boolean | null;
+  pago_deuda_id?: string | null;
   nota: string | null;
+}
+
+export interface PagoDisponible {
+  id: string;
+  fecha: string;
+  valor: number;
+  pagado_por: string | null;
 }
 
 export interface TotalFuente {
@@ -93,7 +102,10 @@ export function useCajaCasa(mes: string) {
     setMetas((rMet.data ?? []) as any[]);
 
     const destinoDeAsignacion = (a: AsignacionRow): DestinoLinea => ({
-      texto: a.destino_tipo === "credito" ? `→ Crédito ${nombreDeuda.get(a.destino_id) ?? ""}`.trim() : `→ Ahorro ${nombreMeta.get(a.destino_id) ?? ""}`.trim(),
+      texto:
+        a.destino_tipo === "credito"
+          ? `→ Crédito ${nombreDeuda.get(a.destino_id) ?? ""}${a.vinculado ? " (pago ya registrado)" : ""}`.trim()
+          : `→ Ahorro ${nombreMeta.get(a.destino_id) ?? ""}`.trim(),
       valor: Number(a.valor),
       asignacion: a,
     });
@@ -255,8 +267,54 @@ export function useCajaCasa(mes: string) {
     await cargar();
   }
 
+  /** Pagos de un crédito que ya estaban registrados y se pueden enlazar con un ingreso (los de este mes y el siguiente). */
+  async function pagosDisponibles(deudaId: string): Promise<PagoDisponible[]> {
+    const [anio, m] = mes.split("-").map(Number);
+    const inicio = `${mes}-01`;
+    const finSig = `${String(new Date(anio, m + 1, 0).getFullYear())}-${String(new Date(anio, m + 1, 0).getMonth() + 1).padStart(2, "0")}-${String(new Date(anio, m + 1, 0).getDate()).padStart(2, "0")}`;
+    const [rP, rV] = await Promise.all([
+      supabase.from("pagos_deuda").select("id, fecha, valor, pagado_por, origen, arriendo_id, abono_prestamo_id, gasto_id").eq("deuda_id", deudaId).gte("fecha", inicio).lte("fecha", finSig).order("fecha"),
+      supabase.from("asignaciones_caja").select("pago_deuda_id").not("pago_deuda_id", "is", null),
+    ]);
+    if (rP.error) throw new Error(rP.error.message);
+    const ya = new Set((rV.error ? [] : rV.data ?? []).map((x: any) => String(x.pago_deuda_id)));
+    return ((rP.data ?? []) as any[])
+      .filter((p) => p.origen !== "registro_inicial" && !p.arriendo_id && !p.abono_prestamo_id && !ya.has(String(p.id)))
+      .map((p) => ({ id: String(p.id), fecha: String(p.fecha).slice(0, 10), valor: Number(p.valor), pagado_por: p.pagado_por ?? null }));
+  }
+
+  /** Enlaza un ingreso con un pago de crédito que YA estaba registrado (no crea ningún pago nuevo). */
+  async function vincular(linea: LineaCaja, deudaId: string, pago: PagoDisponible, valor: number) {
+    if (!(valor > 0)) throw new Error("Escribe un valor mayor que cero.");
+    if (valor > linea.sinAsignar + 0.5) throw new Error(`Solo quedan ${Math.round(linea.sinAsignar).toLocaleString("es-CO")} sin asignar en este ingreso.`);
+    if (valor > pago.valor + 0.5) throw new Error(`Ese pago es de ${Math.round(pago.valor).toLocaleString("es-CO")}; no puedes enlazar más que eso.`);
+    const yo = await nombreUsuarioActual();
+    const { error } = await supabase.from("asignaciones_caja").insert({
+      fuente: linea.fuente,
+      fuente_id: linea.fuenteId,
+      mes,
+      fecha: pago.fecha,
+      valor: Math.round(valor),
+      destino_tipo: "credito",
+      destino_id: deudaId,
+      vinculado: true,
+      pago_deuda_id: pago.id,
+      registrado_por: yo.nombre,
+      nota: `Enlazado con un pago ya registrado (${linea.titulo})`,
+    });
+    if (error) throw new Error(error.message);
+    await cargar();
+  }
+
   /** Deshace una asignación hecha desde esta pantalla (borra el pago o el aporte que se creó). */
   async function quitar(a: AsignacionRow) {
+    if (a.vinculado) {
+      // solo se desenlaza: el pago del crédito ya existía y se queda
+      const { error: errV } = await supabase.from("asignaciones_caja").delete().eq("id", a.id);
+      if (errV) throw new Error(errV.message);
+      await cargar();
+      return;
+    }
     if (a.destino_tipo === "credito" && a.gasto_id) {
       await supabase.from("pagos_deuda").delete().eq("gasto_id", a.gasto_id);
       await supabase.from("gastos").delete().eq("id", a.gasto_id);
@@ -270,5 +328,5 @@ export function useCajaCasa(mes: string) {
     await cargar();
   }
 
-  return { lineas, totales, total, deudas, metas, cargando, error, faltaSql, asignar, quitar, recargar: cargar };
+  return { lineas, totales, total, deudas, metas, cargando, error, faltaSql, asignar, quitar, pagosDisponibles, vincular, recargar: cargar };
 }
