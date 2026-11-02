@@ -9,6 +9,7 @@ import LoginScreen from "../screens/Auth/LoginScreen";
 import DashboardScreen from "../screens/Dashboard/DashboardScreen";
 import IngresosScreen from "../screens/Ingresos/IngresosScreen";
 import GastosScreen from "../screens/Gastos/GastosScreen";
+import CajaCasaScreen from "../screens/Gastos/CajaCasaScreen";
 import AhorrosScreen from "../screens/Ahorros/AhorrosScreen";
 import DeudasScreen from "../screens/Deudas/DeudasScreen";
 import PrestamosScreen from "../screens/Prestamos/PrestamosScreen";
@@ -28,6 +29,7 @@ const PANTALLAS: Record<string, React.ComponentType<any>> = {
   Dashboard: DashboardScreen,
   Ingresos: IngresosScreen,
   Gastos: GastosScreen,
+  Caja: CajaCasaScreen,
   Ahorros: AhorrosScreen,
   Deudas: DeudasScreen,
   Prestamos: PrestamosScreen,
@@ -48,6 +50,7 @@ const ENTRADAS_MENU: EntradaMenu[] = [
       items: [
         { key: "Ingresos", label: "Ingresos", icon: "cash" },
         { key: "Gastos", label: "Gastos", icon: "cart" },
+        { key: "Caja", label: "Caja de la casa", icon: "swap-vertical" },
       ],
     },
   },
@@ -84,6 +87,7 @@ const TITULOS: Record<string, string> = {
   Dashboard: "Resumen",
   Ingresos: "Ingresos",
   Gastos: "Gastos",
+  Caja: "Caja de la casa",
   Ahorros: "Ahorros",
   Deudas: "Deudas y créditos",
   Prestamos: "Préstamos",
