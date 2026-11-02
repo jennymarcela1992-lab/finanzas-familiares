@@ -19,7 +19,7 @@ import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
 
-const RUBROS = ["Mercado", "Servicios", "Salidas y Eventos", "Salud", "Gastos Fijos", "Créditos", "Vehículo", "Propiedades", "Otro"];
+const RUBROS = ["Mercado", "Servicios", "Salidas y Eventos", "Salud", "Gastos Fijos", "Créditos", "Vehículo", "Propiedades", "Juanes", "Otro"];
 const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
   Mercado: "cart",
   Servicios: "flash",
@@ -29,6 +29,7 @@ const ICONO_RUBRO: Record<string, keyof typeof Ionicons.glyphMap> = {
   Créditos: "card",
   Vehículo: "car",
   Propiedades: "business",
+  Juanes: "person",
   Otro: "ellipsis-horizontal",
 };
 
