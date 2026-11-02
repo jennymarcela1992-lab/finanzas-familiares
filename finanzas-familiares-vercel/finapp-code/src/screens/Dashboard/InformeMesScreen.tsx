@@ -11,6 +11,7 @@ import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius, esOscuro } from "../../theme/theme";
 import { pesos } from "../../utils/amortizacion";
 import { descargarXlsx, Hoja } from "../../utils/xlsx";
+import { descargarPdf, Bloque } from "../../utils/pdf";
 import { mesCerrado, cerrarMes, reabrirMes, MesCerrado } from "../../utils/cierreMes";
 import { calcularCuentas, nombreCanonico, LA_CASA } from "../../utils/aportes";
 import { USAR_APORTES } from "../../config/hogar";
@@ -338,6 +339,76 @@ export default function InformeMesScreen() {
     const hojaObs: Hoja = { nombre: "Observaciones", anchos: [14, 120], filas: [[H("Tipo"), H("Observación")], ...observaciones.map((o) => [o.nivel === "ok" ? "Bien" : o.nivel === "aviso" ? "Atención" : "Info", o.texto])] };
     const ok = descargarXlsx(`Informe_${mes}.xlsx`, [resumen, ingresos, hojaGastos, hojaCreditos, hojaObs]);
     if (!ok) Alert.alert("Solo en el navegador", "La descarga del Excel funciona desde la versión web de la app.");
+  }
+
+  // ---------- PDF ----------
+  function exportarPdf() {
+    if (!datos || !a) return;
+    const totalGastos = datos.rubros.reduce((x, r) => x + r.valor, 0);
+    const b: Bloque[] = [];
+    b.push({ t: "titulo", texto: `Informe de ${nombreMes(mes)}`, sub: `${cierre ? "Mes CERRADO" : "Mes abierto"} - Finanzas Familiares` });
+    b.push({ t: "seccion", texto: "Saldo del mes" });
+    b.push({ t: "fila", a: "Saldo del mes", b: pesos(a.balance), fuerte: true, color: a.balance < 0 ? [0.78, 0.2, 0.2] : [0.1, 0.45, 0.3] });
+    b.push({ t: "fila", a: "Total ingresos", b: pesos(a.ingresos) });
+    b.push({ t: "fila", a: "Total salidas", b: pesos(a.salidas) });
+    if (a.ingresos > 0) b.push({ t: "fila", a: "Margen del mes (saldo / ingresos)", b: `${Math.round((a.balance / a.ingresos) * 100)}%` });
+    b.push({ t: "fila", a: "Deuda total", b: pesos(datos.totalDeuda) });
+    b.push({ t: "fila", a: "Patrimonio neto (propiedades + vehiculos + ahorros - deuda)", b: pesos(datos.totalPropiedades + datos.totalVehiculos + datos.totalAhorrado - datos.totalDeuda) });
+
+    if (cuentas) {
+      b.push({ t: "seccion", texto: "Cuentas entre ustedes" });
+      cuentas.filas.forEach((f) => b.push({ t: "fila", a: `${f.nombre} pago`, b: pesos(f.pagado) }));
+      b.push({ t: "fila", a: "Total pagado por las personas", b: pesos(cuentas.total), fuerte: true });
+      b.push({ t: "parrafo", texto: `A cada uno le corresponde poner ${pesos(cuentas.parte)} (mitad por persona).` });
+      b.push({ t: "fila", a: cuentas.transferencias.length ? cuentas.transferencias.map((t) => `${t.de} le debe a ${t.a} ${pesos(t.valor)}`).join(" / ") : "Estan a mano.", fuerte: true });
+    }
+
+    b.push({ t: "seccion", texto: "Lo que entro" });
+    if (USAR_APORTES) b.push({ t: "fila", a: "Aportes de las personas", b: pesos(a.aportes) });
+    b.push({ t: "fila", a: "Arriendos recibidos", b: pesos(a.arriendos) });
+    detalle.arriendos.forEach((l) => b.push({ t: "fila", a: `   ${l.titulo} - ${l.sub}`, b: pesos(l.valor), color: [0.4, 0.4, 0.4] }));
+    b.push({ t: "fila", a: "Carro rentado", b: pesos(a.vehiculo) });
+    b.push({ t: "fila", a: "Inversiones en conjunto", b: pesos(a.inversiones) });
+    detalle.inversiones.forEach((l) => b.push({ t: "fila", a: `   ${l.titulo} - ${l.sub}`, b: pesos(l.valor), color: [0.4, 0.4, 0.4] }));
+    b.push({ t: "fila", a: "Prestamos a terceros (abonos)", b: pesos(a.prestamosCobrados) });
+    if (a.desembolsos > 0) b.push({ t: "fila", a: "Aumentos de creditos", b: pesos(a.desembolsos) });
+    b.push({ t: "fila", a: "Total ingresos", b: pesos(a.ingresos), fuerte: true });
+
+    b.push({ t: "seccion", texto: "Lo que salio" });
+    b.push({ t: "fila", a: "Gastos del mes", b: pesos(a.gastos) });
+    b.push({ t: "fila", a: "Pagos de creditos", b: pesos(a.cuotas) });
+    b.push({ t: "fila", a: "Otras salidas (inversiones, prestamos)", b: pesos(a.otrasSalidas) });
+    b.push({ t: "fila", a: "Total salidas", b: pesos(a.salidas), fuerte: true });
+
+    b.push({ t: "seccion", texto: "Ultimos 6 meses" });
+    b.push({ t: "barras", meses: (datos.meses ?? []).map((m) => ({ etiqueta: mesCorto(m.mes), ingresos: m.ingresos, salidas: m.salidas, saldo: m.balance, etiquetaSaldo: `${m.balance < 0 ? "-" : "+"}${corto(Math.abs(m.balance)).replace("-", "")}` })) });
+
+    b.push({ t: "seccion", texto: "Gastos por rubro" });
+    datos.rubros.forEach((r) => {
+      const antes = datos.rubrosAnterior[r.etiqueta] ?? 0;
+      b.push({ t: "fila", a: r.etiqueta, b: pesos(r.valor), c: `${totalGastos ? Math.round((r.valor / totalGastos) * 100) : 0}%${antes ? ` (antes ${corto(antes)})` : ""}` });
+    });
+
+    b.push({ t: "seccion", texto: "Pagos de creditos por credito" });
+    const grupos = new Map<string, Linea[]>();
+    lineasCreditos.forEach((l) => grupos.set(l.titulo, [...(grupos.get(l.titulo) ?? []), l]));
+    [...grupos.entries()]
+      .sort((x, y) => y[1].reduce((p, l) => p + l.valor, 0) - x[1].reduce((p, l) => p + l.valor, 0))
+      .forEach(([nombre, pagos]) => {
+        b.push({ t: "fila", a: nombre, b: pesos(pagos.reduce((p, l) => p + l.valor, 0)), fuerte: true });
+        pagos.forEach((l) => b.push({ t: "fila", a: `   ${l.sub}`, b: pesos(l.valor), color: [0.4, 0.4, 0.4] }));
+      });
+
+    b.push({ t: "seccion", texto: "Observaciones" });
+    observaciones.forEach((o) => b.push({ t: "parrafo", texto: `${o.nivel === "ok" ? "[Bien]" : o.nivel === "aviso" ? "[Atencion]" : "[Info]"} ${o.texto}` }));
+
+    b.push({ t: "seccion", texto: "Detalle de gastos del mes" });
+    gastos
+      .filter((g) => !g.esCredito)
+      .sort((x, y) => x.fecha.localeCompare(y.fecha))
+      .forEach((g) => b.push({ t: "fila", a: `${g.fecha}  ${g.item} (${g.rubro}${g.pago ? `, ${g.pago}` : ""})`, b: pesos(g.valor) }));
+
+    if (!descargarPdf(`Informe_${mes}.pdf`, b)) Alert.alert("Solo en el navegador", "La descarga del PDF funciona desde la versión web de la app.");
   }
 
   // ---------- Piezas visuales ----------
@@ -718,8 +789,10 @@ export default function InformeMesScreen() {
           {/* 8. Guardar y cerrar */}
           <Card>
             <Text style={typography.h3}>Guardar y cerrar</Text>
+            <PrimaryButton title="Descargar informe en PDF" onPress={exportarPdf} />
+            <View style={{ height: spacing.sm }} />
             <PrimaryButton title="Descargar informe en Excel" onPress={exportar} />
-            <Text style={styles.ayuda}>El Excel trae 5 hojas: Resumen, Ingresos, Gastos, Créditos y Observaciones.</Text>
+            <Text style={styles.ayuda}>El PDF es para leer o compartir. El Excel trae 5 hojas (Resumen, Ingresos, Gastos, Créditos y Observaciones) para trabajar con los datos.</Text>
 
             {!cierre && panel !== "cerrar" && (
               <TouchableOpacity style={styles.botonBorde} onPress={() => setPanel("cerrar")}>
