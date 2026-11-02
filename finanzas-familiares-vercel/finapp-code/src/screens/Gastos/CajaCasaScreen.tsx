@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useCajaCasa, LineaCaja, Fuente, DestinoElegido } from "../../hooks/useCajaCasa";
+import { useCajaCasa, LineaCaja, Fuente, DestinoElegido, PagoDisponible } from "../../hooks/useCajaCasa";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
@@ -25,7 +25,7 @@ const SECCIONES: { fuente: Fuente; titulo: string; icono: keyof typeof Ionicons.
 
 export default function CajaCasaScreen() {
   const [mes, setMes] = useState(hoyISO().slice(0, 7));
-  const { lineas, totales, total, deudas, metas, cargando, error, faltaSql, asignar, quitar } = useCajaCasa(mes);
+  const { lineas, totales, total, deudas, metas, cargando, error, faltaSql, asignar, quitar, pagosDisponibles, vincular } = useCajaCasa(mes);
 
   const [asignando, setAsignando] = useState<string | null>(null); // clave de la línea
   const [tipo, setTipo] = useState<"credito" | "ahorro">("credito");
@@ -33,9 +33,27 @@ export default function CajaCasaScreen() {
   const [valor, setValor] = useState("");
   const [fecha, setFecha] = useState(hoyISO());
   const [guardando, setGuardando] = useState(false);
+  const [modo, setModo] = useState<"nuevo" | "vincular">("nuevo"); // nuevo = crea el pago; vincular = enlaza un pago que ya estaba registrado
+  const [pagosDisp, setPagosDisp] = useState<PagoDisponible[] | null>(null);
+  const [pagoSel, setPagoSel] = useState<string | null>(null);
+
+  // al elegir un crédito en modo "ya lo pagué", se buscan los pagos que ya existen
+  useEffect(() => {
+    setPagoSel(null);
+    if (asignando && tipo === "credito" && modo === "vincular" && destinoId) {
+      setPagosDisp(null);
+      pagosDisponibles(destinoId)
+        .then(setPagosDisp)
+        .catch((e) => {
+          setPagosDisp([]);
+          Alert.alert("Error", e.message);
+        });
+    } else setPagosDisp(null);
+  }, [asignando, tipo, modo, destinoId]);
 
   function abrirAsignar(l: LineaCaja) {
     setAsignando(l.clave);
+    setModo("nuevo");
     setTipo("credito");
     setDestinoId(null);
     setValor(Math.round(l.sinAsignar).toLocaleString("es-CO"));
@@ -45,9 +63,14 @@ export default function CajaCasaScreen() {
   async function guardar(l: LineaCaja) {
     if (!destinoId) return Alert.alert("Falta el destino", tipo === "credito" ? "Elige a cuál crédito va." : "Elige a cuál ahorro va.");
     const destino: DestinoElegido = tipo === "credito" ? { tipo: "credito", deudaId: destinoId } : { tipo: "ahorro", metaId: destinoId };
+    if (tipo === "credito" && modo === "vincular" && !pagoSel) return Alert.alert("Falta el pago", "Elige el pago que ya registraste, o cambia a \"Pago nuevo\".");
     setGuardando(true);
     try {
-      await asignar(l, destino, aNumero(valor), fecha);
+      if (tipo === "credito" && modo === "vincular") {
+        const pago = pagosDisp?.find((p) => p.id === pagoSel);
+        if (!pago) throw new Error("No se encontró el pago elegido.");
+        await vincular(l, destinoId, pago, aNumero(valor));
+      } else await asignar(l, destino, aNumero(valor), fecha);
       setAsignando(null);
     } catch (e: any) {
       Alert.alert("No se pudo asignar", e.message ?? "Intenta de nuevo.");
@@ -56,11 +79,15 @@ export default function CajaCasaScreen() {
     }
   }
 
-  function confirmarQuitar(texto: string, accion: () => Promise<void>) {
-    Alert.alert("Quitar asignación", `¿Quitar "${texto}"? Se borra el pago o el ahorro que se creó con ella.`, [
-      { text: "Cancelar", style: "cancel" },
-      { text: "Quitar", style: "destructive", onPress: () => accion().catch((e) => Alert.alert("Error", e.message)) },
-    ]);
+  function confirmarQuitar(texto: string, accion: () => Promise<void>, enlazado = false) {
+    Alert.alert(
+      "Quitar asignación",
+      enlazado ? `¿Quitar "${texto}"? Solo se desenlaza: el pago del crédito sigue registrado.` : `¿Quitar "${texto}"? Se borra el pago o el ahorro que se creó con ella.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Quitar", style: "destructive", onPress: () => accion().catch((e) => Alert.alert("Error", e.message)) },
+      ]
+    );
   }
 
   function renderLinea(l: LineaCaja) {
@@ -80,7 +107,7 @@ export default function CajaCasaScreen() {
               {d.texto} · {pesos(d.valor)}
             </Text>
             {d.asignacion && (
-              <TouchableOpacity onPress={() => confirmarQuitar(`${d.texto} ${pesos(d.valor)}`, () => quitar(d.asignacion!))}>
+              <TouchableOpacity onPress={() => confirmarQuitar(`${d.texto} ${pesos(d.valor)}`, () => quitar(d.asignacion!), !!d.asignacion!.vinculado)}>
                 <Text style={styles.quitar}>Quitar</Text>
               </TouchableOpacity>
             )}
@@ -127,12 +154,58 @@ export default function CajaCasaScreen() {
                 <Text style={typography.caption}>{tipo === "credito" ? "No hay créditos creados." : "No hay metas de ahorro creadas."}</Text>
               )}
             </View>
+            {tipo === "credito" && (
+              <>
+                <Text style={styles.label}>¿Ya registraste ese pago?</Text>
+                <View style={styles.chips}>
+                  {([["nuevo", "No, registrar pago nuevo"], ["vincular", "Sí, ya está registrado"]] as const).map(([k, t]) => (
+                    <TouchableOpacity key={k} style={[styles.chip, modo === k && styles.chipActivo]} onPress={() => setModo(k)}>
+                      <Text style={[styles.chipTxt, modo === k && styles.chipTxtActivo]}>{t}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
+            {tipo === "credito" && modo === "vincular" && destinoId && (
+              <>
+                <Text style={styles.label}>Elige el pago (de este mes y el siguiente)</Text>
+                {pagosDisp === null ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : pagosDisp.length === 0 ? (
+                  <Text style={styles.ayuda}>No hay pagos de ese crédito sin enlazar en estas fechas. Si no lo has registrado, cambia a «No, registrar pago nuevo».</Text>
+                ) : (
+                  <View style={styles.chips}>
+                    {pagosDisp.map((p) => (
+                      <TouchableOpacity
+                        key={p.id}
+                        style={[styles.chip, pagoSel === p.id && styles.chipActivo]}
+                        onPress={() => {
+                          setPagoSel(p.id);
+                          setValor(Math.round(Math.min(p.valor, l.sinAsignar)).toLocaleString("es-CO"));
+                        }}
+                      >
+                        <Text style={[styles.chipTxt, pagoSel === p.id && styles.chipTxtActivo]}>
+                          {formatoFecha(p.fecha)} · {pesos(p.valor)}
+                          {p.pagado_por ? ` · ${p.pagado_por}` : ""}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
             <Text style={styles.label}>Valor</Text>
             <TextInput style={styles.input} value={valor} onChangeText={setValor} keyboardType="numeric" placeholder="Valor" placeholderTextColor={colors.textMuted} />
-            <Text style={styles.label}>Fecha</Text>
-            <FechaInput value={fecha} onChange={setFecha} max={hoyISO()} />
+            {!(tipo === "credito" && modo === "vincular") && (
+              <>
+                <Text style={styles.label}>Fecha</Text>
+                <FechaInput value={fecha} onChange={setFecha} max={hoyISO()} />
+              </>
+            )}
             <Text style={styles.ayuda}>
-              {tipo === "credito"
+              {tipo === "credito" && modo === "vincular"
+                ? "Solo se enlaza con el pago que ya existe: no se crea ningún pago ni gasto nuevo, y el pago sigue a nombre de quien lo hizo."
+                : tipo === "credito"
                 ? "Queda como pago del crédito hecho por «La casa» (no cuenta como aporte de Jenny ni de Jhon)."
                 : "Queda como aporte al ahorro hecho por «La casa»."}
             </Text>
