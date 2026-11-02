@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../config/supabase";
-import { personasDelHogar, aportesDelMes, nombreCanonico } from "../utils/aportes";
+import { personasDelHogar, aportesDelMes, nombreCanonico, LA_CASA } from "../utils/aportes";
 
 export interface AportePersonaMes {
   usuarioId: string | null;
@@ -62,13 +62,13 @@ export function useCierreMensual(mes: string = mesActual()) {
     const nombres = new Set<string>(aportes.map((a) => a.nombre));
     // el mismo nombre escrito distinto (ej. "Jhon Fredy Ostos Torres" y "Jhon Ostos") cuenta como una persona
     const canon = (n: string) => nombreCanonico(n, Array.from(nombres));
-    (gastosData ?? []).forEach((g: any) => g.usuario_pago_nombre && nombres.add(canon(g.usuario_pago_nombre)));
+    (gastosData ?? []).forEach((g: any) => g.usuario_pago_nombre && g.usuario_pago_nombre !== LA_CASA && nombres.add(canon(g.usuario_pago_nombre)));
 
     const personas: AportePersonaMes[] = Array.from(nombres).map((nombre) => {
       const aporteRow = (aportesData ?? []).find((a: any) => a.usuario_nombre === nombre);
       const ap = aportes.find((a) => a.nombre === nombre);
       const pagado = (gastosData ?? [])
-        .filter((g: any) => g.usuario_pago_nombre && canon(g.usuario_pago_nombre) === nombre)
+        .filter((g: any) => g.usuario_pago_nombre && g.usuario_pago_nombre !== LA_CASA && canon(g.usuario_pago_nombre) === nombre)
         .reduce((s: number, g: any) => s + Number(g.valor_cop ?? g.valor), 0);
       const aporte = ap?.aporte ?? 0;
       return { usuarioId: aporteRow?.usuario_id ?? null, usuarioNombre: nombre, aporte, esBase: ap?.esBase ?? false, pagado, saldo: aporte - pagado };
