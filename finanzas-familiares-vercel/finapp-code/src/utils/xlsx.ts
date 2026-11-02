@@ -160,3 +160,17 @@ export function descargarZip(nombreArchivo: string, archivos: { nombre: string; 
   setTimeout(() => URL.revokeObjectURL(url), 4000);
   return true;
 }
+
+/** Descarga unos bytes como archivo (Excel ya armado, por ejemplo). */
+export function descargarBytes(nombreArchivo: string, bytes: Uint8Array, tipo = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"): boolean {
+  if (typeof document === "undefined" || typeof URL === "undefined") return false;
+  const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: tipo }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return true;
+}

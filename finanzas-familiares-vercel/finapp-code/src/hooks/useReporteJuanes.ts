@@ -84,6 +84,7 @@ export function useReporteJuanes(mes: string) {
   const [lineas, setLineas] = useState<LineaReporte[]>([]);
   const [config, setConfig] = useState<ConfigReporte>({ cuota: 0, pago: 0, saldoAnterior: 0, porcentaje: 50 });
   const [soportes, setSoportes] = useState<Soporte[]>([]);
+  const [libroSubido, setLibroSubido] = useState<boolean | null>(null); // ¿ya hay un libro base guardado?
   const [excluidas, setExcluidas] = useState<Set<string>>(new Set());
   const [cargando, setCargando] = useState(true);
   const [faltaSql, setFaltaSql] = useState(false);
@@ -210,6 +211,54 @@ export function useReporteJuanes(mes: string) {
     return data ? new Uint8Array(await data.arrayBuffer()) : null;
   }
 
+  // ---- Libro de Excel de Jenny (con su historia y fórmulas) ----
+  async function nombresLibros(): Promise<string[]> {
+    const { data: sesion } = await supabase.auth.getUser();
+    const uid = sesion.user?.id;
+    if (!uid) return [];
+    const { data } = await supabase.storage.from(BUCKET_SOPORTES).list(`${uid}/libro`, { limit: 100 });
+    return (data ?? []).map((x) => x.name);
+  }
+
+  const revisarLibro = useCallback(async () => {
+    setLibroSubido((await nombresLibros()).includes("base.xlsx"));
+  }, []);
+  useEffect(() => {
+    revisarLibro();
+  }, [revisarLibro]);
+
+  async function subirLibroBase(file: File) {
+    const { data: sesion } = await supabase.auth.getUser();
+    const uid = sesion.user?.id;
+    if (!uid) throw new Error("Tu sesión expiró.");
+    const { error: err } = await supabase.storage.from(BUCKET_SOPORTES).upload(`${uid}/libro/base.xlsx`, file, { upsert: true, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    if (err) throw new Error(`No se pudo guardar el libro: ${err.message}`);
+    // al cambiar el libro base se descartan los libros mensuales generados con el anterior
+    const otros = (await nombresLibros()).filter((n) => n !== "base.xlsx");
+    if (otros.length) await supabase.storage.from(BUCKET_SOPORTES).remove(otros.map((n) => `${uid}/libro/${n}`));
+    await revisarLibro();
+  }
+
+  /** Libro sobre el que se arma el mes: el último mes ya generado ANTES de este, o el libro base. */
+  async function libroPara(m: string): Promise<{ bytes: Uint8Array; origen: string } | null> {
+    const { data: sesion } = await supabase.auth.getUser();
+    const uid = sesion.user?.id;
+    if (!uid) return null;
+    const nombres = await nombresLibros();
+    const previos = nombres.filter((n) => /^\d{4}-\d{2}\.xlsx$/.test(n) && n.slice(0, 7) < m).sort();
+    const elegido = previos.length ? previos[previos.length - 1] : nombres.includes("base.xlsx") ? "base.xlsx" : null;
+    if (!elegido) return null;
+    const { data } = await supabase.storage.from(BUCKET_SOPORTES).download(`${uid}/libro/${elegido}`);
+    return data ? { bytes: new Uint8Array(await data.arrayBuffer()), origen: elegido } : null;
+  }
+
+  async function guardarLibroMes(m: string, bytes: Uint8Array) {
+    const { data: sesion } = await supabase.auth.getUser();
+    const uid = sesion.user?.id;
+    if (!uid) return;
+    await supabase.storage.from(BUCKET_SOPORTES).upload(`${uid}/libro/${m}.xlsx`, new Blob([bytes as unknown as BlobPart]), { upsert: true, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  }
+
   async function borrarLinea(id: string) {
     const propios = soportes.filter((x) => x.clave === `m-${id}` && x.propio);
     if (propios.length) {
@@ -221,5 +270,5 @@ export function useReporteJuanes(mes: string) {
     await cargar();
   }
 
-  return { lineas, soportes, subirSoporte, borrarSoporte, urlSoporte, bytesSoporte, incluidas, excluidas, config, cargando, faltaSql, error, totalGastos, parteGastos, totalCargo, saldo, alternar, guardarConfig, agregarLinea, borrarLinea };
+  return { lineas, soportes, libroSubido, subirLibroBase, libroPara, guardarLibroMes, revisarLibro, subirSoporte, borrarSoporte, urlSoporte, bytesSoporte, incluidas, excluidas, config, cargando, faltaSql, error, totalGastos, parteGastos, totalCargo, saldo, alternar, guardarConfig, agregarLinea, borrarLinea };
 }
