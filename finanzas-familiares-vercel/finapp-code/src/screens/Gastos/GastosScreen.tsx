@@ -11,6 +11,7 @@ import { useActivos, Activo } from "../../hooks/useActivos";
 import { formatoFecha, pesos, hoyISO, sumarMeses } from "../../utils/amortizacion";
 import { useGastosRecurrentes } from "../../hooks/useGastosRecurrentes";
 import { usePersonas } from "../../hooks/usePersonas";
+import { LA_CASA } from "../../utils/aportes";
 import FechaInput from "../../components/FechaInput";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
@@ -476,7 +477,7 @@ export default function GastosScreen() {
             <TouchableOpacity style={[styles.chip, !filtroPersona && styles.chipActivo]} onPress={() => setFiltroPersona(null)}>
               <Text style={[styles.chipText, !filtroPersona && styles.chipTextActivo]}>Todos</Text>
             </TouchableOpacity>
-            {personas.map((p) => (
+            {[...personas, LA_CASA].map((p) => (
               <TouchableOpacity key={p} style={[styles.chip, filtroPersona === p && styles.chipActivo]} onPress={() => setFiltroPersona(filtroPersona === p ? null : p)}>
                 <Text style={[styles.chipText, filtroPersona === p && styles.chipTextActivo]}>{p}</Text>
               </TouchableOpacity>
@@ -622,7 +623,7 @@ export default function GastosScreen() {
 
           <Text style={styles.label}>{esAutomatico ? "¿Quién lo paga cada mes?" : "¿Quién pagó?"}</Text>
           <View style={styles.chipsRow}>
-            {personas.map((n) => (
+            {[...personas, LA_CASA].map((n) => (
               <TouchableOpacity key={n} style={[styles.chip, (pagaAuto || yo) === n && styles.chipActivo]} onPress={() => setPagaAuto(n)}>
                 <Text style={[styles.chipText, (pagaAuto || yo) === n && styles.chipTextActivo]}>{n}</Text>
               </TouchableOpacity>
