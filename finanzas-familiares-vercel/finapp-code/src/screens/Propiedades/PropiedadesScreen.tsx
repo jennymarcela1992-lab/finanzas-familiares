@@ -87,6 +87,7 @@ export default function PropiedadesScreen() {
   const [mes, setMes] = useState(hoyISO().slice(0, 7));
   const [destino, setDestino] = useState<string>("hogar"); // "hogar" | "p:<persona>" | "c:<deudaId>"
   const [valorCredito, setValorCredito] = useState("");
+  const [partes, setPartes] = useState<{ deudaId: string; valor: string }[]>([{ deudaId: "", valor: "" }, { deudaId: "", valor: "" }]);
 
   const cambiar = (k: keyof typeof FORM_VACIO) => (v: any) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -148,6 +149,7 @@ export default function PropiedadesScreen() {
     const falta = Math.max(0, p.arriendo.valor - p.recibidoMes);
     setMonto(Math.round(falta || p.arriendo.valor).toLocaleString("es-CO"));
     setFecha(hoyISO());
+    setPartes([{ deudaId: "", valor: "" }, { deudaId: "", valor: "" }]);
     setMes(hoyISO().slice(0, 7));
     const ligado = deudas.find((d) => p.creditos.some((c) => c.id === d.id) && d.proximaCuota);
     if (ligado) {
@@ -179,10 +181,19 @@ export default function PropiedadesScreen() {
       if (v > m) return Alert.alert("Valor no válido", "Lo que va al crédito no puede ser mayor que el arriendo recibido.");
       dest = { tipo: "credito", deudaId: destino.slice(2), valor: v };
     }
+    if (destino === "dividir") {
+      const lista = partes.filter((x) => x.deudaId || aNumero(x.valor) > 0);
+      if (lista.length < 2) return Alert.alert("Falta repartir", "Elige al menos dos créditos y el valor de cada uno, o usa la opción de un solo crédito.");
+      if (lista.some((x) => !x.deudaId || !(aNumero(x.valor) > 0))) return Alert.alert("Revisa el reparto", "Cada línea necesita un crédito y un valor mayor que cero.");
+      if (new Set(lista.map((x) => x.deudaId)).size !== lista.length) return Alert.alert("Revisa el reparto", "Elegiste el mismo crédito dos veces.");
+      const suma = lista.reduce((a, x) => a + aNumero(x.valor), 0);
+      if (suma > m) return Alert.alert("Valor no válido", `Lo repartido (${pesos(suma)}) es mayor que el arriendo recibido (${pesos(m)}).`);
+      dest = { tipo: "creditos", partes: lista.map((x) => ({ deudaId: x.deudaId, valor: aNumero(x.valor) })) };
+    }
     setGuardando(true);
     try {
       await registrarArriendoRecibido(prop.id, m, { fecha, mes, destino: dest });
-      if (dest.tipo === "credito") await recargarDeudas();
+      if (dest.tipo === "credito" || dest.tipo === "creditos") await recargarDeudas();
       setProp(null);
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo registrar el arriendo.");
@@ -612,7 +623,12 @@ export default function PropiedadesScreen() {
       <Modal visible={!!prop} transparent animationType="slide">
         <View style={styles.modalFondo}>
           <ScrollView style={styles.modalCaja} contentContainerStyle={{ paddingBottom: spacing.md }} keyboardShouldPersistTaps="handled">
-            <Text style={typography.h2}>Arriendo recibido</Text>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={typography.h2}>Arriendo recibido</Text>
+              <TouchableOpacity onPress={() => setProp(null)} accessibilityLabel="Cerrar sin guardar" hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close-circle" size={30} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
             <Text style={typography.caption}>
               {prop?.nombre} · vigente {pesos(prop?.arriendo.valor ?? 0)}
               {prop && prop.recibidoMes > 0 ? ` · ya recibido este mes ${pesos(prop.recibidoMes)}` : ""}
@@ -647,7 +663,61 @@ export default function PropiedadesScreen() {
                   <Text style={[styles.chipText, destino === `c:${d.id}` && styles.chipTextActivo]}>Pagar {d.nombre}</Text>
                 </TouchableOpacity>
               ))}
+              <TouchableOpacity style={[styles.chip, destino === "dividir" && styles.chipActivo]} onPress={() => elegirDestino("dividir")}>
+                <Text style={[styles.chipText, destino === "dividir" && styles.chipTextActivo]}>✂ Repartir entre varios créditos</Text>
+              </TouchableOpacity>
             </View>
+
+            {destino === "dividir" && (
+              <View style={styles.destinoBox}>
+                <Text style={styles.destinoInfo}>Elige cada crédito y cuánto del arriendo va a él. Lo que sobre queda en el hogar.</Text>
+                {partes.map((pt, i) => (
+                  <View key={i} style={{ marginBottom: spacing.sm }}>
+                    <Text style={styles.label}>Crédito {i + 1}</Text>
+                    <View style={styles.chipsRow}>
+                      {creditosConCuota(prop).map((d) => {
+                        const usado = partes.some((x, j) => j !== i && x.deudaId === d.id);
+                        return (
+                          <TouchableOpacity
+                            key={d.id}
+                            disabled={usado}
+                            style={[styles.chip, pt.deudaId === d.id && styles.chipActivo, usado && { opacity: 0.35 }]}
+                            onPress={() => {
+                              const v = aNumero(pt.valor) > 0 ? pt.valor : Math.min(Math.max(0, aNumero(monto) - partes.reduce((a, x, j) => (j === i ? a : a + aNumero(x.valor)), 0)), d.restanteProxima).toLocaleString("es-CO");
+                              setPartes((arr) => arr.map((x, j) => (j === i ? { deudaId: d.id, valor: v } : x)));
+                            }}
+                          >
+                            <Text style={[styles.chipText, pt.deudaId === d.id && styles.chipTextActivo]}>{d.nombre}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                    <TextInput
+                      style={styles.input}
+                      value={pt.valor}
+                      onChangeText={(t) => setPartes((arr) => arr.map((x, j) => (j === i ? { ...x, valor: t } : x)))}
+                      keyboardType="numeric"
+                      placeholder="Valor para este crédito"
+                      placeholderTextColor={colors.textMuted}
+                    />
+                  </View>
+                ))}
+                {partes.length < 4 && (
+                  <TouchableOpacity onPress={() => setPartes((arr) => [...arr, { deudaId: "", valor: "" }])} style={[styles.chip, { alignSelf: "flex-start", marginBottom: spacing.sm }]}>
+                    <Text style={styles.chipText}>+ Agregar otro crédito</Text>
+                  </TouchableOpacity>
+                )}
+                {(() => {
+                  const suma = partes.reduce((a, x) => a + aNumero(x.valor), 0);
+                  const resto = aNumero(monto) - suma;
+                  return (
+                    <Text style={[styles.destinoInfo, resto < 0 && { color: colors.danger }]}>
+                      Repartido {pesos(suma)} de {pesos(aNumero(monto) || 0)} · {resto < 0 ? `te pasas por ${pesos(-resto)}` : `queda en el hogar ${pesos(resto)}`}
+                    </Text>
+                  );
+                })()}
+              </View>
+            )}
 
             {deudaElegida?.proximaCuota && (
               <View style={styles.destinoBox}>
@@ -666,8 +736,8 @@ export default function PropiedadesScreen() {
             {destino.startsWith("p:") && <Text style={styles.ayuda}>Queda registrado que este arriendo se le entregó a {destino.slice(2)}.</Text>}
 
             <PrimaryButton title="Guardar" onPress={guardarArriendo} loading={guardando} />
-            <TouchableOpacity onPress={() => setProp(null)} style={{ marginTop: spacing.md }}>
-              <Text style={{ textAlign: "center", color: colors.textSecondary }}>Cancelar</Text>
+            <TouchableOpacity onPress={() => setProp(null)} style={{ marginTop: spacing.md, borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md, paddingVertical: 12 }}>
+              <Text style={{ textAlign: "center", color: colors.textPrimary, fontWeight: "600" }}>Salir sin guardar</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
