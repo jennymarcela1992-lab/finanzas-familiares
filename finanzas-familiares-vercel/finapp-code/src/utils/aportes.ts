@@ -1,6 +1,9 @@
 import { supabase } from "../config/supabase";
 import { APORTE_BASE } from "../config/hogar";
 
+/** Pagos hechos con plata de la casa (ingreso del carro, arriendos...): no cuentan como aporte de ninguna persona. */
+export const LA_CASA = "La casa";
+
 export interface AportePersona {
   nombre: string;
   aporte: number;
