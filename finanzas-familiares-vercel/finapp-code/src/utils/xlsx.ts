@@ -73,7 +73,7 @@ function crc32(b: Uint8Array) {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-function zip(archivos: { nombre: string; datos: Uint8Array }[]): Uint8Array {
+export function zip(archivos: { nombre: string; datos: Uint8Array }[]): Uint8Array {
   const partes: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let pos = 0;
@@ -143,5 +143,20 @@ export function descargarXlsx(nombreArchivo: string, hojas: Hoja[]): boolean {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return true;
+}
+
+/** Descarga un ZIP con varios archivos (Excel, fotos, PDF...). Devuelve false si no se puede (celular nativo). */
+export function descargarZip(nombreArchivo: string, archivos: { nombre: string; datos: Uint8Array }[]): boolean {
+  if (typeof document === "undefined" || typeof URL === "undefined") return false;
+  const blob = new Blob([zip(archivos) as unknown as BlobPart], { type: "application/zip" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
   return true;
 }

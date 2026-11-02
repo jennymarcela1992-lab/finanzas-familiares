@@ -1,18 +1,31 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useReporteJuanes } from "../../hooks/useReporteJuanes";
+import { useReporteJuanes, Soporte, LineaReporte, extensionDe } from "../../hooks/useReporteJuanes";
 import { mesHoy, moverMes } from "../../hooks/useDashboard";
 import Card from "../../components/Card";
 import PrimaryButton from "../../components/PrimaryButton";
 import { colors, spacing, typography, radius } from "../../theme/theme";
 import { aNumero } from "../../utils/numeros";
 import { pesos } from "../../utils/amortizacion";
-import { descargarXlsx } from "../../utils/xlsx";
+import { descargarXlsx, crearXlsx, descargarZip, Hoja } from "../../utils/xlsx";
 import { descargarPdf, Bloque } from "../../utils/pdf";
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const nombreMes = (mes: string) => `${MESES[Number(mes.slice(5, 7)) - 1]} ${mes.slice(0, 4)}`;
+const slug = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "gasto";
+
+/** Abre el selector de archivos del navegador (foto, cámara o PDF). */
+function elegirArchivo(): Promise<File | null> {
+  return new Promise((ok) => {
+    if (Platform.OS !== "web" || typeof document === "undefined") return ok(null);
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "image/*,application/pdf";
+    inp.onchange = () => ok(inp.files && inp.files[0] ? inp.files[0] : null);
+    inp.click();
+  });
+}
 const fmt = (n: number) => (n ? Math.round(n).toLocaleString("es-CO") : "");
 
 export default function ReporteJuanes() {
@@ -30,6 +43,8 @@ export default function ReporteJuanes() {
   const [nConcepto, setNConcepto] = useState("");
   const [nValor, setNValor] = useState("");
   const [nNota, setNNota] = useState("");
+  const [subiendo, setSubiendo] = useState<string | null>(null);
+  const [armando, setArmando] = useState(false);
 
   useEffect(() => {
     setCuota(fmt(r.config.cuota));
@@ -89,6 +104,59 @@ export default function ReporteJuanes() {
     ]);
   }
 
+  const soportesDe = (clave: string) => r.soportes.filter((x) => x.clave === clave);
+  const sinSoporte = r.incluidas.filter((l) => soportesDe(l.clave).length === 0);
+
+  // nombre con el que el soporte queda en la carpeta del ZIP y en la columna «Soporte» del Excel
+  const nombreZip = (l: LineaReporte, sp: Soporte, i: number) => `Soportes/${l.fecha}_${slug(l.concepto)}_${i + 1}.${extensionDe(sp.nombre, sp.tipo)}`;
+
+  async function agregarSoporte(l: LineaReporte) {
+    const f = await elegirArchivo();
+    if (!f) return;
+    setSubiendo(l.clave);
+    try {
+      await r.subirSoporte(l.clave, f);
+    } catch (e: any) {
+      Alert.alert("No se pudo subir", e.message ?? "Error");
+    } finally {
+      setSubiendo(null);
+    }
+  }
+  async function verSoporte(sp: Soporte) {
+    const url = await r.urlSoporte(sp);
+    if (!url) return Alert.alert("No se pudo abrir", "Intenta de nuevo.");
+    if (Platform.OS === "web" && typeof window !== "undefined") window.open(url, "_blank");
+  }
+  function confirmarQuitarSoporte(sp: Soporte) {
+    Alert.alert("Quitar soporte", `¿Quitar «${sp.nombre}»?`, [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Quitar", style: "destructive", onPress: () => r.borrarSoporte(sp).catch((e) => Alert.alert("Error", e.message)) },
+    ]);
+  }
+
+  async function paquete() {
+    setArmando(true);
+    try {
+      const enc = new TextEncoder();
+      const archivos: { nombre: string; datos: Uint8Array }[] = [{ nombre: `Gastos_Juan_Carlos_Bernal_${mes}.xlsx`, datos: crearXlsx(hojasExcel()) }];
+      const faltan: string[] = [];
+      for (const l of r.incluidas) {
+        const lista = soportesDe(l.clave);
+        for (let i = 0; i < lista.length; i++) {
+          const datos = await r.bytesSoporte(lista[i]);
+          if (datos) archivos.push({ nombre: nombreZip(l, lista[i], i), datos });
+          else faltan.push(`${l.detalle} (${lista[i].nombre})`);
+        }
+      }
+      const n = archivos.length - 1;
+      if (!descargarZip(`Reporte_Juanes_${mes}.zip`, archivos)) Alert.alert("Solo en el navegador", "La descarga funciona desde la versión web de la app.");
+      else if (faltan.length) Alert.alert("Descargado, pero faltan archivos", `No se pudieron leer ${faltan.length} soportes:\n${faltan.join("\n")}`);
+      else if (sinSoporte.length) Alert.alert("Descargado", `Incluye el Excel y ${n} soportes. Ojo: ${sinSoporte.length} gasto(s) no tienen soporte (salen marcados «SIN SOPORTE» en el Excel).`);
+    } finally {
+      setArmando(false);
+    }
+  }
+
   // totales por concepto (solo líneas incluidas)
   function resumenPorConcepto() {
     const m = new Map<string, number>();
@@ -96,9 +164,9 @@ export default function ReporteJuanes() {
     return [...m.entries()];
   }
 
-  function excel() {
+  function hojasExcel(): Hoja[] {
     const filasConcepto = resumenPorConcepto().map(([c, v]) => [c, { v, estilo: "dinero" as const }, { v: (v * vivo.p) / 100, estilo: "dinero" as const }]);
-    const ok = descargarXlsx(`Gastos_Juan_Carlos_Bernal_${mes}.xlsx`, [
+    return [
       {
         nombre: "Reporte",
         anchos: [34, 18, 22],
@@ -118,13 +186,20 @@ export default function ReporteJuanes() {
       },
       {
         nombre: "Detalle",
-        anchos: [12, 28, 44, 14, 18, 22],
+        anchos: [12, 28, 44, 14, 18, 22, 60],
         filas: [
-          [{ v: "Fecha", estilo: "encabezado" }, { v: "Concepto", estilo: "encabezado" }, { v: "Detalle", estilo: "encabezado" }, { v: "Origen", estilo: "encabezado" }, { v: "Valor total", estilo: "encabezado" }, { v: "A cargo de Juan Carlos", estilo: "encabezado" }],
-          ...r.incluidas.map((l) => [l.fecha, l.concepto, l.detalle, l.origen === "manual" ? "Manual" : "Registrado", { v: l.valor, estilo: "dinero" as const }, { v: (l.valor * vivo.p) / 100, estilo: "dinero" as const }]),
+          [{ v: "Fecha", estilo: "encabezado" }, { v: "Concepto", estilo: "encabezado" }, { v: "Detalle", estilo: "encabezado" }, { v: "Origen", estilo: "encabezado" }, { v: "Valor total", estilo: "encabezado" }, { v: "A cargo de Juan Carlos", estilo: "encabezado" }, { v: "Soporte (archivo en la carpeta Soportes del ZIP)", estilo: "encabezado" }],
+          ...r.incluidas.map((l) => {
+            const lista = soportesDe(l.clave);
+            return [l.fecha, l.concepto, l.detalle, l.origen === "manual" ? "Manual" : "Registrado", { v: l.valor, estilo: "dinero" as const }, { v: (l.valor * vivo.p) / 100, estilo: "dinero" as const }, lista.length ? lista.map((sp, i) => nombreZip(l, sp, i).replace("Soportes/", "")).join(" | ") : "SIN SOPORTE"];
+          }),
         ],
       },
-    ]);
+    ];
+  }
+
+  function excel() {
+    const ok = descargarXlsx(`Gastos_Juan_Carlos_Bernal_${mes}.xlsx`, hojasExcel());
     if (!ok) Alert.alert("Solo en el navegador", "La descarga funciona desde la versión web de la app.");
   }
 
@@ -140,7 +215,7 @@ export default function ReporteJuanes() {
       { t: "fila", a: "SALDO", c: pesos(vivo.saldo), fuerte: true },
       { t: "espacio" },
       { t: "seccion", texto: "Detalle de los gastos" },
-      ...r.incluidas.map((l): Bloque => ({ t: "fila", a: `${l.fecha} - ${l.detalle}`, b: `total ${pesos(l.valor)}`, c: pesos((l.valor * vivo.p) / 100) })),
+      ...r.incluidas.map((l): Bloque => ({ t: "fila", a: `${l.fecha} - ${l.detalle}${soportesDe(l.clave).length ? "" : " (sin soporte)"}`, b: `total ${pesos(l.valor)}`, c: pesos((l.valor * vivo.p) / 100) })),
     ];
     const ok = descargarPdf(`Gastos_Juan_Carlos_Bernal_${mes}.pdf`, bloques);
     if (!ok) Alert.alert("Solo en el navegador", "La descarga funciona desde la versión web de la app.");
@@ -203,6 +278,11 @@ export default function ReporteJuanes() {
             <Text style={[typography.caption, { marginBottom: 4 }]}>
               Se toman solos los gastos de la familia y los tuyos que dicen «ruta», «onces» o «Juanes» (o tienen el rubro Juanes). Toca el círculo para quitar o volver a poner uno.
             </Text>
+            {r.incluidas.length > 0 && (
+              <Text style={[typography.caption, { fontWeight: "700", color: sinSoporte.length ? colors.danger : colors.success }]}>
+                {sinSoporte.length ? `${r.incluidas.length - sinSoporte.length} de ${r.incluidas.length} gastos con soporte · faltan ${sinSoporte.length}` : `Los ${r.incluidas.length} gastos tienen soporte`}
+              </Text>
+            )}
             {grupos.length === 0 && <Text style={[typography.caption, { marginTop: 6 }]}>Este mes todavía no hay gastos que coincidan. Registra los gastos en Gastos (rubro Juanes, o que digan ruta/onces) o agrégalos a mano abajo.</Text>}
             {grupos.map(([concepto, items]) => {
               const sub = items.filter((l) => !r.excluidas.has(l.clave)).reduce((s, l) => s + l.valor, 0);
@@ -215,7 +295,8 @@ export default function ReporteJuanes() {
                   {items.map((l) => {
                     const incl = !r.excluidas.has(l.clave);
                     return (
-                      <View key={l.clave} style={styles.linea}>
+                      <React.Fragment key={l.clave}>
+                      <View style={styles.linea}>
                         <TouchableOpacity onPress={() => r.alternar(l.clave)} accessibilityLabel={incl ? "Quitar del reporte" : "Poner en el reporte"} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                           <Ionicons name={incl ? "checkmark-circle" : "ellipse-outline"} size={24} color={incl ? colors.success : colors.textMuted} />
                         </TouchableOpacity>
@@ -230,6 +311,27 @@ export default function ReporteJuanes() {
                           </TouchableOpacity>
                         )}
                       </View>
+                      <View style={styles.soportes}>
+                        {soportesDe(l.clave).map((sp) => (
+                          <View key={sp.id} style={styles.soporteChip}>
+                            <TouchableOpacity onPress={() => verSoporte(sp)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }} accessibilityLabel={`Ver ${sp.nombre}`}>
+                              <Ionicons name={sp.tipo === "application/pdf" ? "document-text-outline" : "image-outline"} size={14} color={colors.primary} />
+                              <Text style={styles.soporteTexto} numberOfLines={1}>{sp.nombre}</Text>
+                            </TouchableOpacity>
+                            {sp.propio && (
+                              <TouchableOpacity onPress={() => confirmarQuitarSoporte(sp)} accessibilityLabel="Quitar soporte" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                                <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        ))}
+                        {soportesDe(l.clave).length === 0 && <Text style={styles.sinSoporte}>Sin soporte</Text>}
+                        <TouchableOpacity style={styles.soporteAgregar} onPress={() => agregarSoporte(l)} disabled={subiendo === l.clave} accessibilityLabel="Subir soporte">
+                          {subiendo === l.clave ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="attach" size={16} color={colors.primary} />}
+                          <Text style={styles.soporteAgregarTexto}>{subiendo === l.clave ? "Subiendo..." : "Subir factura / foto"}</Text>
+                        </TouchableOpacity>
+                      </View>
+                      </React.Fragment>
                     );
                   })}
                 </View>
@@ -254,14 +356,16 @@ export default function ReporteJuanes() {
             )}
           </Card>
 
+          <PrimaryButton title="Descargar paquete completo (Excel + soportes)" onPress={paquete} loading={armando} />
+          <Text style={[typography.caption, { textAlign: "center" }]}>El ZIP trae el Excel actualizado y una carpeta «Soportes» con las fotos y PDF de cada factura.</Text>
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
             <TouchableOpacity style={[styles.botonBorde, { flex: 1 }]} onPress={excel}>
               <Ionicons name="download-outline" size={16} color={colors.primary} />
-              <Text style={styles.botonBordeTexto}>Descargar Excel</Text>
+              <Text style={styles.botonBordeTexto}>Solo Excel</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.botonBorde, { flex: 1 }]} onPress={pdf}>
               <Ionicons name="document-text-outline" size={16} color={colors.primary} />
-              <Text style={styles.botonBordeTexto}>Descargar PDF</Text>
+              <Text style={styles.botonBordeTexto}>Solo PDF</Text>
             </TouchableOpacity>
           </View>
         </>
@@ -282,6 +386,12 @@ const styles = StyleSheet.create({
   linea: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border, marginTop: 6 },
   lineaTitulo: { fontSize: 13, fontWeight: "600", color: colors.textPrimary },
   lineaValor: { fontSize: 13, fontWeight: "800", color: colors.textPrimary },
+  soportes: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginLeft: 34, marginBottom: 6 },
+  soporteChip: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: 14, paddingHorizontal: 8, paddingVertical: 4, maxWidth: 220 },
+  soporteTexto: { fontSize: 12, color: colors.primary, flexShrink: 1 },
+  sinSoporte: { fontSize: 12, color: colors.danger, fontWeight: "700" },
+  soporteAgregar: { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderColor: colors.primary, borderRadius: 14, paddingHorizontal: 8, paddingVertical: 4 },
+  soporteAgregarTexto: { fontSize: 12, color: colors.primary, fontWeight: "700" },
   salir: { marginTop: spacing.sm, borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md, paddingVertical: 12 },
   botonBorde: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1.5, borderColor: colors.primary, borderRadius: radius.md, paddingVertical: 12 },
   botonBordeTexto: { color: colors.primary, fontWeight: "700", fontSize: 14 },

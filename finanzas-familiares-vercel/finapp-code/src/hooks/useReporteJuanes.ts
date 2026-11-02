@@ -2,6 +2,7 @@
 // «ruta», «onces» o «Juanes» (o tienen el rubro Juanes), más líneas manuales, y calcula la parte que le corresponde.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../config/supabase";
+import { Platform } from "react-native";
 import { moverMes } from "./useDashboard";
 
 export interface LineaReporte {
@@ -12,6 +13,53 @@ export interface LineaReporte {
   valor: number;
   origen: "familia" | "personal" | "manual";
   idManual?: string;
+  comprobante?: string; // foto que ya se subió al registrar el gasto de la familia (bucket «comprobantes»)
+}
+
+export interface Soporte {
+  id: string;
+  clave: string;
+  nombre: string;
+  ruta: string;
+  bucket: "soportes_juanes" | "comprobantes";
+  tipo: string;
+  propio: boolean; // true = se subió aquí y se puede quitar
+}
+
+const BUCKET_SOPORTES = "soportes_juanes";
+const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp", "image/heic": "heic", "image/heif": "heif", "application/pdf": "pdf" };
+export const extensionDe = (nombre: string, tipo?: string) => EXT[tipo ?? ""] ?? (nombre.includes(".") ? nombre.split(".").pop()!.toLowerCase() : "jpg");
+
+function rutaComprobante(v: string): string {
+  if (v.startsWith("http")) {
+    const i = v.indexOf("/comprobantes/");
+    return i >= 0 ? decodeURIComponent(v.slice(i + 14).split("?")[0]) : v;
+  }
+  return v;
+}
+
+// En el navegador reduce las fotos (máx. 1600 px, JPG) para que suban rápido; los PDF se suben tal cual.
+async function reducirFoto(file: File): Promise<Blob> {
+  if (Platform.OS !== "web" || typeof document === "undefined" || !file.type.startsWith("image/") || file.type === "image/heic" || file.type === "image/heif") return file;
+  try {
+    const url = URL.createObjectURL(file);
+    const img: HTMLImageElement = await new Promise((ok, falla) => {
+      const i = new (window as any).Image();
+      i.onload = () => ok(i);
+      i.onerror = falla;
+      i.src = url;
+    });
+    const escala = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * escala);
+    canvas.height = Math.round(img.height * escala);
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    const r: Blob | null = await new Promise((ok) => canvas.toBlob(ok, "image/jpeg", 0.8));
+    return r && r.size < file.size ? r : file;
+  } catch {
+    return file;
+  }
 }
 
 export interface ConfigReporte {
@@ -35,6 +83,7 @@ export function conceptoJuanes(item: string, nota: string | null | undefined, ru
 export function useReporteJuanes(mes: string) {
   const [lineas, setLineas] = useState<LineaReporte[]>([]);
   const [config, setConfig] = useState<ConfigReporte>({ cuota: 0, pago: 0, saldoAnterior: 0, porcentaje: 50 });
+  const [soportes, setSoportes] = useState<Soporte[]>([]);
   const [excluidas, setExcluidas] = useState<Set<string>>(new Set());
   const [cargando, setCargando] = useState(true);
   const [faltaSql, setFaltaSql] = useState(false);
@@ -51,11 +100,12 @@ export function useReporteJuanes(mes: string) {
     }
     const desde = `${mes}-01`;
     const hasta = `${moverMes(mes, 1)}-01`;
-    const [rG, rP, rL, rC] = await Promise.all([
-      supabase.from("gastos").select("id, fecha, item, nota, rubro, valor, valor_cop, borrado, usuario_pago_nombre").gte("fecha", desde).lt("fecha", hasta),
+    const [rG, rP, rL, rC, rS] = await Promise.all([
+      supabase.from("gastos").select("id, fecha, item, nota, rubro, valor, valor_cop, borrado, usuario_pago_nombre, comprobante_url").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("movimientos_personales").select("*").eq("usuario_id", uid).eq("tipo", "gasto").gte("fecha", desde).lt("fecha", hasta),
       supabase.from("reporte_juanes_lineas").select("*").eq("usuario_id", uid).eq("mes", mes).order("creado_en"),
       supabase.from("reporte_juanes_mes").select("*").eq("usuario_id", uid).eq("mes", mes).maybeSingle(),
+      supabase.from("reporte_juanes_soportes").select("*").eq("usuario_id", uid).eq("mes", mes).order("creado_en"),
     ]);
     if (rL.error && /relation|does not exist|schema cache/i.test(rL.error.message)) {
       setFaltaSql(true);
@@ -67,7 +117,7 @@ export function useReporteJuanes(mes: string) {
     ((rG.error ? [] : rG.data) ?? []).forEach((g: any) => {
       if (g.borrado) return;
       const c = conceptoJuanes(g.item ?? "", g.nota, g.rubro);
-      if (c) out.push({ clave: `g-${g.id}`, fecha: String(g.fecha).slice(0, 10), concepto: c, detalle: `${g.item}${g.usuario_pago_nombre ? ` · pagó ${g.usuario_pago_nombre}` : ""}`, valor: Number(g.valor_cop ?? g.valor), origen: "familia" });
+      if (c) out.push({ clave: `g-${g.id}`, fecha: String(g.fecha).slice(0, 10), concepto: c, detalle: `${g.item}${g.usuario_pago_nombre ? ` · pagó ${g.usuario_pago_nombre}` : ""}`, valor: Number(g.valor_cop ?? g.valor), origen: "familia", comprobante: g.comprobante_url ? rutaComprobante(g.comprobante_url) : undefined });
     });
     ((rP.error ? [] : rP.data) ?? []).forEach((m: any) => {
       const c = conceptoJuanes(m.concepto ?? "", m.nota, null, m.categoria);
@@ -76,6 +126,11 @@ export function useReporteJuanes(mes: string) {
     ((rL.error ? [] : rL.data) ?? []).forEach((l: any) => out.push({ clave: `m-${l.id}`, fecha: `${mes}-01`, concepto: l.concepto, detalle: l.nota ?? "Agregado a mano", valor: Number(l.valor_total), origen: "manual", idManual: l.id }));
     out.sort((a, b) => a.fecha.localeCompare(b.fecha));
     setLineas(out);
+    const sop: Soporte[] = ((rS.error ? [] : rS.data) ?? []).map((x: any) => ({ id: x.id, clave: x.clave, nombre: x.nombre, ruta: x.ruta, bucket: BUCKET_SOPORTES, tipo: x.tipo ?? "", propio: true }));
+    out.forEach((l) => {
+      if (l.comprobante) sop.push({ id: `c-${l.clave}`, clave: l.clave, nombre: "Foto registrada en Gastos", ruta: l.comprobante, bucket: "comprobantes", tipo: "image/jpeg", propio: false });
+    });
+    setSoportes(sop);
     const c: any = rC.error ? null : rC.data;
     setConfig(c ? { cuota: Number(c.cuota ?? 0), pago: Number(c.pago ?? 0), saldoAnterior: Number(c.saldo_anterior ?? 0), porcentaje: Number(c.porcentaje ?? 50) } : { cuota: 0, pago: 0, saldoAnterior: 0, porcentaje: 50 });
     setExcluidas(new Set());
@@ -119,11 +174,52 @@ export function useReporteJuanes(mes: string) {
     await cargar();
   }
 
+  async function subirSoporte(clave: string, file: File) {
+    const { data: sesion } = await supabase.auth.getUser();
+    const uid = sesion.user?.id;
+    if (!uid) throw new Error("Tu sesión expiró.");
+    const blob = await reducirFoto(file);
+    const tipo = blob.type || file.type || "application/octet-stream";
+    const ext = extensionDe(file.name, tipo);
+    const ruta = `${uid}/${mes}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+    const { error: e1 } = await supabase.storage.from(BUCKET_SOPORTES).upload(ruta, blob, { contentType: tipo });
+    if (e1) throw new Error(`No se pudo subir el archivo: ${e1.message}`);
+    const { error: e2 } = await supabase.from("reporte_juanes_soportes").insert({ usuario_id: uid, mes, clave, nombre: file.name, ruta, tipo });
+    if (e2) {
+      await supabase.storage.from(BUCKET_SOPORTES).remove([ruta]);
+      throw e2;
+    }
+    await cargar();
+  }
+
+  async function borrarSoporte(s: Soporte) {
+    if (!s.propio) return;
+    await supabase.storage.from(BUCKET_SOPORTES).remove([s.ruta]);
+    const { error: err } = await supabase.from("reporte_juanes_soportes").delete().eq("id", s.id);
+    if (err) throw err;
+    await cargar();
+  }
+
+  async function urlSoporte(s: Soporte): Promise<string | null> {
+    const { data } = await supabase.storage.from(s.bucket).createSignedUrl(s.ruta, 60 * 10);
+    return data?.signedUrl ?? null;
+  }
+
+  async function bytesSoporte(s: Soporte): Promise<Uint8Array | null> {
+    const { data } = await supabase.storage.from(s.bucket).download(s.ruta);
+    return data ? new Uint8Array(await data.arrayBuffer()) : null;
+  }
+
   async function borrarLinea(id: string) {
+    const propios = soportes.filter((x) => x.clave === `m-${id}` && x.propio);
+    if (propios.length) {
+      await supabase.storage.from(BUCKET_SOPORTES).remove(propios.map((x) => x.ruta));
+      await supabase.from("reporte_juanes_soportes").delete().in("id", propios.map((x) => x.id));
+    }
     const { error: err } = await supabase.from("reporte_juanes_lineas").delete().eq("id", id);
     if (err) throw err;
     await cargar();
   }
 
-  return { lineas, incluidas, excluidas, config, cargando, faltaSql, error, totalGastos, parteGastos, totalCargo, saldo, alternar, guardarConfig, agregarLinea, borrarLinea };
+  return { lineas, soportes, subirSoporte, borrarSoporte, urlSoporte, bytesSoporte, incluidas, excluidas, config, cargando, faltaSql, error, totalGastos, parteGastos, totalCargo, saldo, alternar, guardarConfig, agregarLinea, borrarLinea };
 }
