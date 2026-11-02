@@ -11,18 +11,21 @@ import { colors, spacing, typography, radius, esOscuro } from "../../theme/theme
 import { aNumero } from "../../utils/numeros";
 import { pesos, hoyISO } from "../../utils/amortizacion";
 import { descargarXlsx } from "../../utils/xlsx";
+import PatrimonioPersonal from "./PatrimonioPersonal";
+import ReporteJuanes from "./ReporteJuanes";
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const nombreMes = (mes: string) => `${MESES[Number(mes.slice(5, 7)) - 1]} ${mes.slice(0, 4)}`;
 
 const CATEGORIAS = {
   ingreso: ["Salario", "Honorarios", "Clases", "Rendimientos", "Venta", "Otro ingreso"],
-  gasto: ["Personal", "Salud", "Transporte", "Ropa", "Salidas", "Educación", "Suscripciones", "Ahorro personal", "Regalos", "Otro gasto"],
+  gasto: ["Juanes", "Personal", "Salud", "Transporte", "Ropa", "Salidas", "Educación", "Suscripciones", "Ahorro personal", "Regalos", "Otro gasto"],
 };
 const ING = esOscuro ? "#3987e5" : "#2a78d6";
 const GAS = esOscuro ? "#d95926" : "#eb6834";
 
 export default function MisFinanzasScreen() {
+  const [vista, setVista] = useState<"mov" | "pat" | "juan">("mov");
   const [mes, setMes] = useState(mesHoy());
   const { movimientos, cargando, error, faltaSql, guardar, borrar } = usePersonales(mes);
   const esMesActual = mes === mesHoy();
@@ -114,6 +117,19 @@ export default function MisFinanzasScreen() {
   return (
     <View style={styles.container}>
       <ScreenHeader title="Mis finanzas" subtitle="Privado: solo tú ves esto" />
+      <View style={styles.pestanas}>
+        {([["mov", "Ingresos y gastos"], ["pat", "Patrimonio y deudas"], ["juan", "Reporte Juanes"]] as const).map(([k, t]) => (
+          <TouchableOpacity key={k} style={[styles.pestana, vista === k && styles.pestanaActiva]} onPress={() => setVista(k)}>
+            <Text style={[styles.pestanaTexto, vista === k && { color: colors.white }]}>{t}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {vista === "pat" || vista === "juan" ? (
+        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, width: "100%", maxWidth: 760, alignSelf: "center" }} keyboardShouldPersistTaps="handled">
+          {vista === "pat" ? <PatrimonioPersonal /> : <ReporteJuanes />}
+        </ScrollView>
+      ) : (
+      <>
       <View style={styles.selector}>
         <TouchableOpacity onPress={() => setMes(moverMes(mes, -1))} style={styles.flecha} accessibilityLabel="Mes anterior">
           <Ionicons name="chevron-back" size={20} color={colors.primary} />
@@ -242,11 +258,17 @@ export default function MisFinanzasScreen() {
           )}
         </ScrollView>
       )}
+      </>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  pestanas: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, width: "100%", maxWidth: 760, alignSelf: "center" },
+  pestana: { flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.primary },
+  pestanaActiva: { backgroundColor: colors.primary },
+  pestanaTexto: { color: colors.primary, fontWeight: "700", fontSize: 13, textAlign: "center" },
   container: { flex: 1, backgroundColor: colors.background },
   selector: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingBottom: spacing.md, width: "100%", maxWidth: 760, alignSelf: "center" },
   flecha: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
