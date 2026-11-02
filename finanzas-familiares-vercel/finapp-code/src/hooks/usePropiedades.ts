@@ -91,7 +91,8 @@ const VALOR_VACIO: ValorArriendo = { valor: 0, ultimoAjuste: null, proximoAjuste
 export type DestinoArriendo =
   | { tipo: "hogar" }
   | { tipo: "persona"; persona: string }
-  | { tipo: "credito"; deudaId: string; valor: number };
+  | { tipo: "credito"; deudaId: string; valor: number }
+  | { tipo: "creditos"; partes: { deudaId: string; valor: number }[] };
 
 const mesDe = (f: string) => String(f).slice(0, 7);
 
@@ -369,19 +370,32 @@ export function usePropiedades() {
       .single();
     if (err) throw err;
 
-    if (destino.tipo === "credito" && destino.valor > 0) {
+    const partes =
+      destino.tipo === "credito"
+        ? destino.valor > 0
+          ? [{ deudaId: destino.deudaId, valor: destino.valor }]
+          : []
+        : destino.tipo === "creditos"
+        ? destino.partes.filter((x) => x.valor > 0)
+        : [];
+    if (partes.length) {
       const prop = propiedades.find((p) => p.id === propiedadId);
       try {
-        await registrarPagoDeuda({
-          deudaId: destino.deudaId,
-          valor: destino.valor,
-          fecha,
-          origen: "arriendo",
-          pagadoPor: `Arriendo ${prop?.nombre ?? ""}`.trim(),
-          arriendoId: arriendo.id,
-        });
+        for (const parte of partes) {
+          await registrarPagoDeuda({
+            deudaId: parte.deudaId,
+            valor: parte.valor,
+            fecha,
+            origen: "arriendo",
+            pagadoPor: `Arriendo ${prop?.nombre ?? ""}`.trim(),
+            arriendoId: arriendo.id,
+          });
+        }
       } catch (e) {
+        // deshace todo lo que alcanzó a guardarse
+        await supabase.from("pagos_deuda").delete().eq("arriendo_id", arriendo.id);
         await supabase.from("arriendos_recibidos").delete().eq("id", arriendo.id);
+        for (const parte of partes) await reaplicarPagos(parte.deudaId).catch(() => {});
         throw e;
       }
     }
