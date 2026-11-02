@@ -459,7 +459,7 @@ export default function InformeMesScreen() {
 
   /** Pagos de créditos agrupados por crédito: se toca el crédito y salen sus pagos uno a uno. */
   function DesplegableCreditos({ valor }: { valor: number }) {
-    const abre = abierta === "s-cre";
+    const abre = abierta === "s-cre" || (abierta?.startsWith("s-cre:") ?? false); // sigue abierto aunque se abra un crédito
     const grupos = new Map<string, { total: number; pagos: Linea[] }>();
     lineasCreditos.forEach((l) => {
       const g = grupos.get(l.titulo) ?? { total: 0, pagos: [] };
