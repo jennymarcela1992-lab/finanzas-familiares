@@ -4,6 +4,7 @@ import { supabase } from "../config/supabase";
 import { todo } from "../utils/consultas";
 import { mismaPersona } from "../utils/aportes";
 import { asegurarAutomaticos } from "../utils/automaticos";
+import { exigirMesAbierto } from "../utils/cierreMes";
 import { registrarPagoDeuda, reaplicarPagos } from "../utils/pagosDeuda";
 
 export interface GastoRow {
@@ -150,6 +151,7 @@ export function useGastos() {
   }, [cargarGastos]);
 
   async function agregarGasto(nuevo: NuevoGasto) {
+    await exigirMesAbierto(nuevo.fecha);
     const { data: sesion } = await supabase.auth.getUser();
     const usuario = sesion.user;
 
@@ -213,6 +215,7 @@ export function useGastos() {
   ) {
     const actual = [...gastos, ...papelera].find((g) => g.id === id);
     if (!actual) throw new Error("No se encontró el gasto.");
+    await exigirMesAbierto(actual.fecha, cambios.fecha);
     const { data: sesion } = await supabase.auth.getUser();
     const usuario = sesion.user;
 
@@ -288,6 +291,7 @@ export function useGastos() {
   }
 
   async function moverAPapelera(id: string) {
+    await exigirMesAbierto(gastos.find((x) => x.id === id)?.fecha);
     const { data: sesion } = await supabase.auth.getUser();
     const nombre = sesion.user?.user_metadata?.nombre ?? sesion.user?.email ?? "Alguien";
     const { error: err } = await supabase
@@ -301,6 +305,7 @@ export function useGastos() {
   }
 
   async function restaurarGasto(id: string) {
+    await exigirMesAbierto(papelera.find((x) => x.id === id)?.fecha);
     const { data: sesion } = await supabase.auth.getUser();
     const nombre = sesion.user?.user_metadata?.nombre ?? sesion.user?.email ?? "Alguien";
     const { error: err } = await supabase
@@ -315,6 +320,7 @@ export function useGastos() {
 
   async function borrarGasto(id: string) {
     const fila = [...gastos, ...papelera].find((g) => g.id === id);
+    await exigirMesAbierto(fila?.fecha);
     const { error: err } = await supabase.from("gastos").delete().eq("id", id);
     if (err) throw err;
     if (fila?.deuda_id) await reaplicarPagos(fila.deuda_id); // el pago se borró junto con el gasto

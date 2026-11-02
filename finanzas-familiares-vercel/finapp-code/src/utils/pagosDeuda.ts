@@ -1,6 +1,7 @@
 // Pagos de créditos: una cuota SOLO queda pagada cuando hay pagos registrados que la cubren.
 // Los pagos pueden venir de un gasto (lo pagó una persona), de un arriendo, o del registro inicial
 // (cuotas que ya estaban pagadas cuando se creó el crédito en la app).
+import { exigirMesAbierto } from "./cierreMes";
 import { supabase } from "../config/supabase";
 
 export type OrigenPago = "persona" | "arriendo" | "registro_inicial" | "prestamo";
@@ -153,6 +154,7 @@ export async function registrarPagoDeuda(p: {
   abonoPrestamoId?: string | null;
 }) {
   if (!(p.valor > 0)) throw new Error("El valor del pago debe ser mayor que cero.");
+  await exigirMesAbierto(p.fecha);
   const yo = await nombreUsuarioActual();
   const { data, error } = await supabase
     .from("pagos_deuda")

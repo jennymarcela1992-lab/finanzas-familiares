@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Activi
 import { Ionicons } from "@expo/vector-icons";
 import { useDashboard, mesHoy, moverMes } from "../../hooks/useDashboard";
 import { useCierreMensual } from "../../hooks/useCierreMensual";
+import { useDetalleIngresos, ClaveDetalle } from "../../hooks/useDetalleIngresos";
 import { useAuth } from "../../hooks/useAuth";
 import ScreenHeader from "../../components/ScreenHeader";
 import Card from "../../components/Card";
@@ -25,6 +26,8 @@ export default function IngresosScreen() {
   const [agregando, setAgregando] = useState(false);
   const [nuevaPersona, setNuevaPersona] = useState("");
   const esMesActual = mes === mesHoy();
+  const detalle = useDetalleIngresos(mes);
+  const [abierta, setAbierta] = useState<string | null>(null);
 
   async function guardarAporte(nombre: string, nuevo: number) {
     if (!(nuevo >= 0)) return Alert.alert("Valor no válido", "Escribe el aporte de este mes.");
@@ -43,13 +46,13 @@ export default function IngresosScreen() {
   }
 
   const a = datos?.actual;
-  const otras = a
+  const otras: { icono: string; texto: string; valor: number; donde: string; clave: ClaveDetalle }[] = a
     ? [
-        { icono: "business", texto: "Arriendos recibidos", valor: a.arriendos, donde: "Se registran en Propiedades" },
-        { icono: "car", texto: "Carro rentado", valor: a.vehiculo, donde: "Se registra en Vehículo rentado" },
-        { icono: "trending-up", texto: "Inversiones en conjunto", valor: a.inversiones, donde: "Ingresos registrados en Inversiones" },
-        { icono: "people", texto: "Préstamos a terceros (abonos recibidos)", valor: a.prestamosCobrados, donde: "Abonos registrados en Préstamos personales" },
-        ...(a.desembolsos > 0 ? [{ icono: "card", texto: "Aumentos de créditos recibidos", valor: a.desembolsos, donde: "Registrados en Deudas (Aumentar préstamo)" }] : []),
+        { icono: "business", texto: "Arriendos recibidos", valor: a.arriendos, donde: "Se registran en Propiedades", clave: "arriendos" as ClaveDetalle },
+        { icono: "car", texto: "Carro rentado", valor: a.vehiculo, donde: "Se registra en Vehículo rentado", clave: "vehiculo" as ClaveDetalle },
+        { icono: "trending-up", texto: "Inversiones en conjunto", valor: a.inversiones, donde: "Ingresos registrados en Inversiones", clave: "inversiones" as ClaveDetalle },
+        { icono: "people", texto: "Préstamos a terceros (abonos recibidos)", valor: a.prestamosCobrados, donde: "Abonos registrados en Préstamos personales", clave: "prestamos" as ClaveDetalle },
+        ...(a.desembolsos > 0 ? [{ icono: "card", texto: "Aumentos de créditos recibidos", valor: a.desembolsos, donde: "Registrados en Deudas (Aumentar préstamo)", clave: "desembolsos" as ClaveDetalle }] : []),
       ]
     : [];
   const totalOtras = otras.reduce((s, o) => s + o.valor, 0);
@@ -187,18 +190,51 @@ export default function IngresosScreen() {
 
           <Card>
             <Text style={typography.h3}>Otras entradas en conjunto</Text>
-            {otras.map((o) => (
-              <View key={o.texto} style={styles.otraFila}>
-                <View style={styles.icono}>
-                  <Ionicons name={o.icono as any} size={15} color={colors.primary} />
+            <Text style={styles.ayuda}>Toca cada línea para ver de dónde salió.</Text>
+            {otras.map((o) => {
+              const lineas = detalle[o.clave] ?? [];
+              const suma = lineas.reduce((x, l) => x + l.valor, 0);
+              const resto = Math.round(o.valor - suma);
+              const abiertaEsta = abierta === o.clave;
+              return (
+                <View key={o.texto}>
+                  <TouchableOpacity style={styles.otraFila} onPress={() => setAbierta(abiertaEsta ? null : o.clave)} activeOpacity={0.6}>
+                    <View style={styles.icono}>
+                      <Ionicons name={o.icono as any} size={15} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.otraTexto}>{o.texto}</Text>
+                      <Text style={typography.caption}>{o.donde}</Text>
+                    </View>
+                    <Text style={[styles.monto, o.valor === 0 && { color: colors.textMuted }]}>{pesos(o.valor)}</Text>
+                    <Ionicons name={abiertaEsta ? "chevron-up" : "chevron-down"} size={16} color={colors.textMuted} />
+                  </TouchableOpacity>
+                  {abiertaEsta && (
+                    <View style={styles.detalleBox}>
+                      {lineas.length === 0 && resto === 0 && <Text style={typography.caption}>No hay movimientos en este mes.</Text>}
+                      {lineas.map((l, k) => (
+                        <View key={k} style={styles.detalleFila}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.otraTexto}>{l.titulo}</Text>
+                            <Text style={typography.caption}>{l.sub}</Text>
+                          </View>
+                          <Text style={styles.detalleValor}>{pesos(l.valor)}</Text>
+                        </View>
+                      ))}
+                      {Math.abs(resto) > 1 && (
+                        <View style={styles.detalleFila}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.otraTexto}>Otros movimientos sin detalle</Text>
+                            <Text style={typography.caption}>Entra en el total pero no se pudo identificar su origen</Text>
+                          </View>
+                          <Text style={styles.detalleValor}>{pesos(resto)}</Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.otraTexto}>{o.texto}</Text>
-                  <Text style={typography.caption}>{o.donde}</Text>
-                </View>
-                <Text style={[styles.monto, o.valor === 0 && { color: colors.textMuted }]}>{pesos(o.valor)}</Text>
-              </View>
-            ))}
+              );
+            })}
             <View style={[styles.otraFila, { borderTopColor: colors.textMuted }]}>
               <Text style={[styles.otraTexto, { flex: 1, fontWeight: "800" }]}>Total otras entradas</Text>
               <Text style={styles.monto}>{pesos(totalOtras)}</Text>
@@ -233,6 +269,9 @@ const styles = StyleSheet.create({
   botonCancelar: { backgroundColor: colors.background, padding: 9, borderRadius: radius.sm },
   otraFila: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border },
   icono: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
+  detalleBox: { backgroundColor: colors.infoBg, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 8 },
+  detalleFila: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 7 },
+  detalleValor: { fontSize: 13, fontWeight: "700", color: colors.textPrimary },
   otraTexto: { fontSize: 13, fontWeight: "600", color: colors.textPrimary },
   errorText: { color: colors.danger, padding: spacing.lg },
 });

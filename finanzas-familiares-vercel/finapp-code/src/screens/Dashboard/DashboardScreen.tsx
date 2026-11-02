@@ -591,6 +591,14 @@ function Presupuesto({ pr, mes, modo, contraparte }: { pr: PresupuestoMes; mes: 
                   })}
               </View>
             ))}
+          {abierto && esPagos && !!pr.avisos?.length && (
+            <View style={{ marginTop: spacing.md }}>
+              <Text style={styles.subtitulo}>Créditos que no aparecen este mes</Text>
+              {pr.avisos.map((a, k) => (
+                <Text key={k} style={[styles.ayuda, { marginTop: 4 }]}>• {a}</Text>
+              ))}
+            </View>
+          )}
         </>
       )}
     </Card>

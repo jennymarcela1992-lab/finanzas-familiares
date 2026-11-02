@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { exigirMesAbierto } from "../utils/cierreMes";
 import { supabase } from "../config/supabase";
 import { todo } from "../utils/consultas";
 import { hoyISO } from "../utils/amortizacion";
@@ -226,6 +227,7 @@ export function useVehiculos() {
 
   /** Registra (o corrige) lo que pasó un día: pagó la cuota, pagó otro valor, o no pagó. */
   async function registrarDia(vehiculoId: string, fecha: string, estado: "pagado" | "no_pagado", monto: number | null, nota?: string) {
+    await exigirMesAbierto(fecha);
     const { error: errBorrar } = await supabase.from("pagos_vehiculo").delete().eq("vehiculo_id", vehiculoId).eq("fecha", fecha);
     if (errBorrar) throw errBorrar;
     const { error: err } = await supabase
@@ -238,6 +240,7 @@ export function useVehiculos() {
   /** Marca varios días como pagados con la cuota normal (ej. todos los pendientes del mes). */
   async function registrarVarios(vehiculoId: string, fechas: string[], monto: number) {
     if (!fechas.length) return;
+    await exigirMesAbierto(...fechas);
     const { error: errBorrar } = await supabase.from("pagos_vehiculo").delete().eq("vehiculo_id", vehiculoId).in("fecha", fechas);
     if (errBorrar) throw errBorrar;
     const { error: err } = await supabase.from("pagos_vehiculo").insert(fechas.map((fecha) => ({ vehiculo_id: vehiculoId, fecha, estado: "pagado", monto })));
@@ -246,6 +249,7 @@ export function useVehiculos() {
   }
 
   async function borrarDia(vehiculoId: string, fecha: string) {
+    await exigirMesAbierto(fecha);
     const { error: err } = await supabase.from("pagos_vehiculo").delete().eq("vehiculo_id", vehiculoId).eq("fecha", fecha);
     if (err) throw err;
     await cargar();

@@ -22,6 +22,7 @@ const FORM_VACIO = {
   direccion: "",
   valorComercial: "",
   generaIngresos: true,
+  arriendoAutomatico: false,
 };
 
 const CONTRATO_VACIO = {
@@ -105,6 +106,7 @@ export default function PropiedadesScreen() {
       direccion: p.direccion ?? "",
       valorComercial: p.valor_comercial ? Math.round(Number(p.valor_comercial)).toLocaleString("es-CO") : "",
       generaIngresos: p.genera_ingresos,
+      arriendoAutomatico: !!p.arriendo_automatico,
     });
     setEditandoId(p.id);
     setMostrarForm(true);
@@ -123,6 +125,7 @@ export default function PropiedadesScreen() {
       direccion: form.direccion.trim() || undefined,
       valorComercial: aNumero(form.valorComercial) || null,
       generaIngresos: form.generaIngresos,
+      arriendoAutomatico: form.arriendoAutomatico,
       contrato,
     };
     setGuardando(true);
@@ -578,6 +581,15 @@ export default function PropiedadesScreen() {
               <Text style={[typography.body, { flex: 1 }]}>Se arrienda (genera ingresos). Apágalo si es de uso propio: solo suma a patrimonio y gastos.</Text>
               <Switch value={form.generaIngresos} onValueChange={cambiar("generaIngresos")} trackColor={{ true: colors.primary }} />
             </View>
+
+            {form.generaIngresos && (
+              <View style={styles.switchFila}>
+                <Text style={[typography.body, { flex: 1 }]}>
+                  Arriendo automático: se anota solo cada mes, en el día de pago del contrato (por el valor vigente). Úsalo si el arriendo llega sin que tengas que registrarlo.
+                </Text>
+                <Switch value={form.arriendoAutomatico} onValueChange={cambiar("arriendoAutomatico")} trackColor={{ true: colors.primary }} />
+              </View>
+            )}
 
             {form.generaIngresos && !editandoId && (
               <>

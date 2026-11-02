@@ -5,6 +5,7 @@ import { registrarPagoDeuda, restanteDeCuota, reaplicarPagos } from "../utils/pa
 import { hoyISO, sumarMeses } from "../utils/amortizacion";
 import { arriendoDePropiedad, fechaPagoArriendo, diasEntre, ValorArriendo, ContratoArriendo } from "../utils/arriendo";
 import { cargarVinculos } from "../utils/deudaActivos";
+import { exigirMesAbierto } from "../utils/cierreMes";
 
 export interface ArriendoRow {
   id: string;
@@ -50,6 +51,7 @@ export interface PropiedadConDetalle {
   dia_pago_arriendo: number;
   credito_id: string | null;
   genera_ingresos: boolean; // false = uso propio: solo patrimonio y gastos
+  arriendo_automatico?: boolean; // true = el arriendo se anota solo cada mes
   contratos: ContratoArriendo[];
   contrato: ContratoArriendo | null; // contrato vigente (null = desocupada o uso propio)
   arriendos: ArriendoRow[];
@@ -73,6 +75,7 @@ export interface DatosPropiedad {
   direccion?: string;
   valorComercial?: number | null;
   generaIngresos: boolean;
+  arriendoAutomatico?: boolean;
   /** Solo al crear: el primer contrato de arriendo (opcional). */
   contrato?: DatosContrato | null;
 }
@@ -224,12 +227,14 @@ export function usePropiedades() {
     cargar();
   }, [cargar]);
 
-  function fila(d: DatosPropiedad) {
+  function fila(d: DatosPropiedad, previa?: boolean) {
     return {
       nombre: d.nombre,
       direccion: d.direccion ?? null,
       valor_comercial: d.valorComercial ?? null,
       genera_ingresos: d.generaIngresos,
+      // solo se envía si hace falta, para no fallar si todavía no se ha corrido el SQL de arriendo automático
+      ...(d.arriendoAutomatico || previa !== undefined ? { arriendo_automatico: !!d.arriendoAutomatico && d.generaIngresos } : {}),
     };
   }
 
@@ -267,7 +272,7 @@ export function usePropiedades() {
   }
 
   async function editarPropiedad(id: string, d: DatosPropiedad) {
-    const { error: err } = await supabase.from("propiedades").update(fila(d)).eq("id", id);
+    const { error: err } = await supabase.from("propiedades").update(fila(d, propiedades.find((x) => x.id === id)?.arriendo_automatico)).eq("id", id);
     if (err) throw err;
     await cargar();
   }
@@ -354,6 +359,7 @@ export function usePropiedades() {
     opciones: { mes?: string; fecha?: string; destino?: DestinoArriendo; nota?: string } = {}
   ) {
     const fecha = opciones.fecha ?? hoyISO();
+    await exigirMesAbierto(fecha, opciones.mes);
     const destino = opciones.destino ?? { tipo: "hogar" };
     const { data: arriendo, error: err } = await supabase
       .from("arriendos_recibidos")
@@ -404,6 +410,7 @@ export function usePropiedades() {
 
   /** Borra un arriendo mal registrado (si pagó un crédito, ese pago también se borra). */
   async function eliminarArriendo(a: ArriendoRow) {
+    await exigirMesAbierto(a.mes, a.fecha);
     const { data: pagosLigados } = await supabase.from("pagos_deuda").select("deuda_id").eq("arriendo_id", a.id);
     const { error: err } = await supabase.from("arriendos_recibidos").delete().eq("id", a.id);
     if (err) throw err;

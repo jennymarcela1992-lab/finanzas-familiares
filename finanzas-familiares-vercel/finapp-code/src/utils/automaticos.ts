@@ -5,6 +5,7 @@
 import { supabase } from "../config/supabase";
 import { hoyISO } from "./amortizacion";
 import { registrarPagoDeuda, restanteDeCuota } from "./pagosDeuda";
+import { arriendoDePropiedad, fechaPagoArriendo } from "./arriendo";
 
 let enCurso: Promise<void> | null = null;
 let ultimaVez = 0;
@@ -23,6 +24,11 @@ export function asegurarAutomaticos(): Promise<void> {
       await procesarGastosRecurrentes();
     } catch (e) {
       console.warn("Gastos automáticos:", e);
+    }
+    try {
+      await procesarArriendosAutomaticos();
+    } catch (e) {
+      console.warn("Arriendos automáticos:", e);
     }
     ultimaVez = Date.now();
     enCurso = null;
@@ -141,4 +147,46 @@ async function procesarGastosRecurrentes() {
 function siguienteDia(f: string) {
   const d = new Date(Date.UTC(Number(f.slice(0, 4)), Number(f.slice(5, 7)) - 1, Number(f.slice(8, 10)) + 1));
   return d.toISOString().slice(0, 10);
+}
+
+
+/**
+ * Propiedades marcadas con «arriendo automático»: en el día de pago del contrato se anota el arriendo
+ * del mes (este y el anterior) por el valor vigente. No duplica: si ese mes ya tiene un arriendo, no hace nada.
+ */
+async function procesarArriendosAutomaticos() {
+  const { data: props, error } = await supabase.from("propiedades").select("*").eq("arriendo_automatico", true);
+  if (error || !props?.length) return; // sin la columna (o sin propiedades automáticas) no hay nada que hacer
+  const [rK, rI] = await Promise.all([supabase.from("contratos_arriendo").select("*"), supabase.from("ipc_anual").select("*")]);
+  const contratosFilas = rK.error ? null : ((rK.data ?? []) as any[]);
+  const ipc: Record<number, number> = {};
+  (rI.data ?? []).forEach((r: any) => (ipc[Number(r.anio)] = Number(r.variacion)));
+  const hoy = hoyISO();
+  const mesActual = hoy.slice(0, 7);
+  const [a, m] = mesActual.split("-").map(Number);
+  const mesAnterior = m === 1 ? `${a - 1}-12` : `${a}-${String(m - 1).padStart(2, "0")}`;
+  for (const p of props as any[]) {
+    if (p.genera_ingresos === false) continue;
+    for (const mes of [mesAnterior, mesActual]) {
+      const ultimo = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)), 0)).getUTCDate();
+      const fin = `${mes}-${String(ultimo).padStart(2, "0")}`;
+      const info = arriendoDePropiedad(p, contratosFilas, ipc, fin);
+      const c = info.contrato;
+      if (!c || c.fecha_inicio > fin || (c.fecha_fin && c.fecha_fin < `${mes}-01`)) continue;
+      const dia = fechaPagoArriendo(mes, c.dia_pago ?? p.dia_pago_arriendo);
+      if (dia > hoy || dia < c.fecha_inicio) continue;
+      const valor = Math.round(arriendoDePropiedad(p, contratosFilas, ipc, dia).valor?.valor ?? 0);
+      if (!(valor > 0)) continue;
+      const { data: ya } = await supabase.from("arriendos_recibidos").select("id").eq("propiedad_id", p.id).eq("mes", mes).limit(1);
+      if (ya && ya.length) continue;
+      await supabase.from("arriendos_recibidos").insert({
+        propiedad_id: p.id,
+        monto: valor,
+        mes,
+        fecha: dia,
+        nota: "Arriendo automático",
+        ...(c.id ? { contrato_id: c.id } : {}),
+      });
+    }
+  }
 }

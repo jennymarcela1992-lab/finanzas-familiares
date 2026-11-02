@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { exigirMesAbierto } from "../utils/cierreMes";
 import { supabase } from "../config/supabase";
 import { personasDelHogar, aportesDelMes, nombreCanonico, LA_CASA } from "../utils/aportes";
 
@@ -87,6 +88,7 @@ export function useCierreMensual(mes: string = mesActual()) {
   }, [cargar]);
 
   async function definirAporte(usuarioNombre: string, aporte: number, usuarioId?: string) {
+    await exigirMesAbierto(mes);
     // Busca si ya existe un aporte para esta persona este mes; si sí, lo actualiza, si no, lo crea
     const { data: existente } = await supabase.from("aportes_mes").select("id").eq("mes", mes).eq("usuario_nombre", usuarioNombre).maybeSingle();
 

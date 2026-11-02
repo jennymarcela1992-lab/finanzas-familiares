@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { exigirMesAbierto } from "../utils/cierreMes";
 import { supabase } from "../config/supabase";
 import { todo } from "../utils/consultas";
 import { TipoTasa, tasaMensual, tasaPeriodo, generarCuotas, fechaCuota, hoyISO, FilaCuota } from "../utils/amortizacion";
@@ -291,6 +292,7 @@ export function usePrestamos() {
    * queda en el hogar, se le entregó a una persona, o pagó directamente la cuota de un crédito.
    */
   async function registrarAbono(prestamoId: string, monto: number, fecha: string, destino: DestinoAbono, nota?: string) {
+    await exigirMesAbierto(fecha);
     const prestamo = prestamos.find((p) => p.id === prestamoId);
     const { data: abono, error: err } = await supabase
       .from("abonos_prestamo")
@@ -325,6 +327,7 @@ export function usePrestamos() {
   }
 
   async function eliminarAbono(a: AbonoRow) {
+    await exigirMesAbierto(a.fecha);
     const { error: err } = await supabase.from("abonos_prestamo").delete().eq("id", a.id);
     if (err) throw err;
     if (a.deuda_id) await reaplicarPagos(a.deuda_id);

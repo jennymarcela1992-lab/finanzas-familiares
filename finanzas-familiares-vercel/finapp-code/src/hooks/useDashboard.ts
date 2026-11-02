@@ -56,6 +56,7 @@ export interface ItemPresupuesto {
 
 export interface PresupuestoMes {
   items: ItemPresupuesto[];
+  avisos?: string[]; // ej. créditos que no tienen cuota este mes (para entender por qué no aparecen)
   total: number;
   pagado: number;
   pendiente: number;
@@ -395,9 +396,9 @@ async function armarPresupuesto(mes: string, cuotas: any[], deudasInfo: Map<stri
     const valor = Number(r.valor);
     const pagado = gastosRec.filter((g) => g.recurrente_id === r.id).reduce((s, g) => s + Number(g.valor_cop ?? g.valor), 0);
     items.push({
-      tipo: "automatico",
+      tipo: r.rubro === "Créditos" ? "credito" : "automatico", // un pago automático de crédito se ve junto a los créditos
       nombre: r.item,
-      detalle: `${r.rubro ?? "Gasto"}${r.usuario_pago_nombre ? ` · paga ${r.usuario_pago_nombre}` : ""}`,
+      detalle: `${r.rubro === "Créditos" ? "Pago de crédito automático" : r.rubro ?? "Gasto"}${r.usuario_pago_nombre ? ` · paga ${r.usuario_pago_nombre}` : ""}`,
       fecha: `${mes}-${String(dia).padStart(2, "0")}`,
       valor,
       pagado: Math.min(valor, pagado),
@@ -434,7 +435,22 @@ async function armarPresupuesto(mes: string, cuotas: any[], deudasInfo: Map<stri
   const total = items.reduce((s, i) => s + i.valor, 0);
   const pagado = items.reduce((s, i) => s + i.pagado, 0);
   const suma = (t: ItemPresupuesto["tipo"]) => items.filter((i) => i.tipo === t).reduce((s, i) => s + i.valor, 0);
-  return { items, total, pagado, pendiente: Math.max(0, total - pagado), porTipo: { credito: suma("credito"), automatico: suma("automatico"), prestamo: suma("prestamo") } };
+
+  // Créditos que no salen en la lista porque no tienen cuota en este mes: se explica por qué
+  const avisos: string[] = [];
+  deudasInfo.forEach((d, id) => {
+    const suyas = cuotas.filter((c) => c.deuda_id === id);
+    if (suyas.some((c) => mesDe(c.fecha_vencimiento) === mes)) return;
+    if (suyas.length === 0) {
+      avisos.push(`${d.nombre}: no tiene tabla de cuotas creada (en Deudas y créditos, ábrelo y genera la tabla para que aparezca aquí).`);
+      return;
+    }
+    const pendientes = suyas.filter((c) => c.estado !== "pagada").sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)));
+    if (pendientes.length === 0) return; // ya terminó de pagarse
+    const prox = pendientes[0];
+    avisos.push(`${d.nombre}: no tiene cuota que venza en este mes; su cuota pendiente más próxima es la #${prox.numero_cuota} del ${String(prox.fecha_vencimiento).slice(0, 10)}.`);
+  });
+  return { items, avisos, total, pagado, pendiente: Math.max(0, total - pagado), porTipo: { credito: suma("credito"), automatico: suma("automatico"), prestamo: suma("prestamo") } };
 }
 
 function resumir(items: ItemPresupuesto[]): PresupuestoMes {
