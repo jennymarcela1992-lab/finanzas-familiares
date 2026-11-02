@@ -367,6 +367,77 @@ export default function InformeMesScreen() {
     );
   }
 
+  /** Pagos de créditos agrupados por crédito: se toca el crédito y salen sus pagos uno a uno. */
+  function DesplegableCreditos({ valor }: { valor: number }) {
+    const abre = abierta === "s-cre";
+    const grupos = new Map<string, { total: number; pagos: Linea[] }>();
+    lineasCreditos.forEach((l) => {
+      const g = grupos.get(l.titulo) ?? { total: 0, pagos: [] };
+      g.total += l.valor;
+      g.pagos.push(l);
+      grupos.set(l.titulo, g);
+    });
+    const lista = [...grupos.entries()].sort((x, y) => y[1].total - x[1].total);
+    const suma = lineasCreditos.reduce((x, l) => x + l.valor, 0);
+    const resto = Math.round(valor - suma);
+    return (
+      <View>
+        <TouchableOpacity style={styles.fila} onPress={() => setAbierta(abre ? null : "s-cre")} activeOpacity={0.6} accessibilityLabel="Ver los créditos pagados">
+          <Text style={styles.filaTexto}>Pagos de créditos · {lista.length} crédito{lista.length === 1 ? "" : "s"}</Text>
+          <Text style={styles.filaValor}>{pesos(valor)}</Text>
+          <Ionicons name={abre ? "chevron-up" : "chevron-down"} size={16} color={colors.textMuted} />
+        </TouchableOpacity>
+        {abre && (
+          <View style={styles.detalleBox}>
+            <Text style={[typography.caption, { marginBottom: 4 }]}>Toca un crédito para ver cada pago. Un pago repetido (misma fecha y valor) aparece marcado.</Text>
+            {lista.length === 0 && <Text style={typography.caption}>No hay pagos de créditos en este mes.</Text>}
+            {lista.map(([nombre, g]) => {
+              const clave = `s-cre:${nombre}`;
+              const dentro = abierta === clave;
+              return (
+                <View key={nombre} style={styles.grupoCredito}>
+                  <TouchableOpacity style={styles.detalleFila} onPress={() => setAbierta(dentro ? "s-cre" : clave)} activeOpacity={0.6}>
+                    <Ionicons name="card" size={16} color={colors.primary} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detalleTitulo}>{nombre}</Text>
+                      <Text style={typography.caption}>
+                        {g.pagos.length} pago{g.pagos.length === 1 ? "" : "s"}
+                      </Text>
+                    </View>
+                    <Text style={styles.detalleValor}>{pesos(g.total)}</Text>
+                    <Ionicons name={dentro ? "chevron-up" : "chevron-down"} size={14} color={colors.textMuted} />
+                  </TouchableOpacity>
+                  {dentro &&
+                    g.pagos.map((l, k) => {
+                      const repetido = g.pagos.some((o, j) => j !== k && o.valor === l.valor && o.sub.slice(0, 10) === l.sub.slice(0, 10));
+                      return (
+                        <View key={k} style={styles.pagoCredito}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.detalleTitulo}>{l.sub.split(" · ")[0]}</Text>
+                            <Text style={typography.caption}>{l.sub.split(" · ").slice(1).join(" · ") || "—"}</Text>
+                            {repetido && <Text style={[typography.caption, { color: colors.warning, fontWeight: "700" }]}>⚠ Posible pago repetido (misma fecha y valor)</Text>}
+                          </View>
+                          <Text style={styles.detalleValor}>{pesos(l.valor)}</Text>
+                        </View>
+                      );
+                    })}
+                </View>
+              );
+            })}
+            {Math.abs(resto) > 1 && (
+              <View style={styles.detalleFila}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.detalleTitulo}>Otros movimientos sin detalle</Text>
+                </View>
+                <Text style={styles.detalleValor}>{pesos(resto)}</Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }
+
   function Kpi({ titulo, valor, nota, color }: { titulo: string; valor: string; nota?: string; color?: string }) {
     return (
       <View style={styles.kpi}>
@@ -557,7 +628,7 @@ export default function InformeMesScreen() {
           <Card>
             <Text style={typography.h3}>Lo que salió</Text>
             <Desplegable clave="s-gas" titulo="Gastos del mes" valor={a.gastos} lineas={lineasGastos()} nota="Sin los pagos de crédito, que van aparte. De mayor a menor." />
-            <Desplegable clave="s-cre" titulo="Pagos de créditos" valor={a.cuotas} lineas={lineasCreditos} nota="Cada pago aplicado a un crédito en el mes, incluidos abonos extra." />
+            <DesplegableCreditos valor={a.cuotas} />
             <Desplegable clave="s-otr" titulo="Otras salidas (inversiones, préstamos)" valor={a.otrasSalidas} lineas={otrasSalidas} />
             <Desplegable clave="s-tot" titulo="Total salidas" valor={a.salidas} lineas={[]} fuerte nota="Gastos + pagos de créditos + otras salidas." />
             <View style={[styles.fila, { borderTopColor: colors.textMuted }]}>
@@ -664,6 +735,8 @@ const styles = StyleSheet.create({
   saldoEtiqueta: { fontSize: 10, fontWeight: "700", marginTop: 1 },
   detalleBox: { backgroundColor: colors.infoBg, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 6, marginBottom: 8 },
   detalleFila: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 7 },
+  grupoCredito: { borderTopWidth: 1, borderTopColor: colors.border },
+  pagoCredito: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6, paddingLeft: 26, paddingRight: 4, backgroundColor: colors.surface, borderRadius: 6, marginBottom: 4 },
   detalleTitulo: { fontSize: 13, fontWeight: "600", color: colors.textPrimary },
   detalleValor: { fontSize: 13, fontWeight: "700", color: colors.textPrimary },
   obsFila: { flexDirection: "row", gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border },
