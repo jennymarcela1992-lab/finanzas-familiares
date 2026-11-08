@@ -1,7 +1,7 @@
 // Generador mínimo de archivos Excel (.xlsx) sin librerías: varias hojas, encabezados en negrita, dinero con formato.
 // Un .xlsx es un ZIP con XML; aquí se arma el ZIP sin comprimir.
 
-export type Celda = string | number | null | { v: string | number; estilo?: "titulo" | "encabezado" | "dinero" | "dineroNegrita" | "negrita" | "porcentaje" };
+export type Celda = string | number | null | { v: string | number; estilo?: "titulo" | "encabezado" | "dinero" | "dineroNegrita" | "negrita" | "porcentaje"; f?: string };
 export interface Hoja {
   nombre: string;
   filas: Celda[][];
@@ -28,6 +28,7 @@ function xmlHoja(h: Hoja) {
           const ref = `${letra(i)}${r + 1}`;
           const v = typeof c === "object" ? c.v : c;
           const est = typeof c === "object" && c.estilo ? ESTILO[c.estilo] : 0;
+          if (typeof v === "number" && typeof c === "object" && c.f) return `<c r="${ref}" s="${est}"><f>${esc(c.f)}</f><v>${v}</v></c>`; // fórmula con su valor ya calculado
           if (typeof v === "number") return `<c r="${ref}" s="${est}"><v>${v}</v></c>`;
           return `<c r="${ref}" s="${est}" t="inlineStr"><is><t xml:space="preserve">${esc(String(v))}</t></is></c>`;
         })

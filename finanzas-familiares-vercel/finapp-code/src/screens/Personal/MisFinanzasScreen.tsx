@@ -13,6 +13,7 @@ import { pesos, hoyISO } from "../../utils/amortizacion";
 import { descargarXlsx } from "../../utils/xlsx";
 import PatrimonioPersonal from "./PatrimonioPersonal";
 import ReporteJuanes from "./ReporteJuanes";
+import CruceCuentas from "./CruceCuentas";
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const nombreMes = (mes: string) => `${MESES[Number(mes.slice(5, 7)) - 1]} ${mes.slice(0, 4)}`;
@@ -25,7 +26,7 @@ const ING = esOscuro ? "#3987e5" : "#2a78d6";
 const GAS = esOscuro ? "#d95926" : "#eb6834";
 
 export default function MisFinanzasScreen() {
-  const [vista, setVista] = useState<"mov" | "pat" | "juan">("mov");
+  const [vista, setVista] = useState<"mov" | "pat" | "juan" | "mami">("mov");
   const [mes, setMes] = useState(mesHoy());
   const { movimientos, cargando, error, faltaSql, guardar, borrar } = usePersonales(mes);
   const esMesActual = mes === mesHoy();
@@ -118,15 +119,15 @@ export default function MisFinanzasScreen() {
     <View style={styles.container}>
       <ScreenHeader title="Mis finanzas" subtitle="Privado: solo tú ves esto" />
       <View style={styles.pestanas}>
-        {([["mov", "Ingresos y gastos"], ["pat", "Patrimonio y deudas"], ["juan", "Reporte Juanes"]] as const).map(([k, t]) => (
+        {([["mov", "Ingresos y gastos"], ["pat", "Patrimonio y deudas"], ["juan", "Reporte Juanes"], ["mami", "Cuentas con mami"]] as const).map(([k, t]) => (
           <TouchableOpacity key={k} style={[styles.pestana, vista === k && styles.pestanaActiva]} onPress={() => setVista(k)}>
             <Text style={[styles.pestanaTexto, vista === k && { color: colors.white }]}>{t}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      {vista === "pat" || vista === "juan" ? (
+      {vista === "pat" || vista === "juan" || vista === "mami" ? (
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, width: "100%", maxWidth: 760, alignSelf: "center" }} keyboardShouldPersistTaps="handled">
-          {vista === "pat" ? <PatrimonioPersonal /> : <ReporteJuanes />}
+          {vista === "pat" ? <PatrimonioPersonal /> : vista === "juan" ? <ReporteJuanes /> : <CruceCuentas />}
         </ScrollView>
       ) : (
       <>
@@ -265,8 +266,8 @@ export default function MisFinanzasScreen() {
 }
 
 const styles = StyleSheet.create({
-  pestanas: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, width: "100%", maxWidth: 760, alignSelf: "center" },
-  pestana: { flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.primary },
+  pestanas: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, width: "100%", maxWidth: 760, alignSelf: "center" },
+  pestana: { flexGrow: 1, minWidth: 130, alignItems: "center", paddingVertical: 10, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.primary },
   pestanaActiva: { backgroundColor: colors.primary },
   pestanaTexto: { color: colors.primary, fontWeight: "700", fontSize: 13, textAlign: "center" },
   container: { flex: 1, backgroundColor: colors.background },

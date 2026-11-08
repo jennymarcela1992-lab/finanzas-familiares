@@ -39,7 +39,7 @@ function rutaComprobante(v: string): string {
 }
 
 // En el navegador reduce las fotos (máx. 1600 px, JPG) para que suban rápido; los PDF se suben tal cual.
-async function reducirFoto(file: File): Promise<Blob> {
+export async function reducirFoto(file: File): Promise<Blob> {
   if (Platform.OS !== "web" || typeof document === "undefined" || !file.type.startsWith("image/") || file.type === "image/heic" || file.type === "image/heif") return file;
   try {
     const url = URL.createObjectURL(file);
