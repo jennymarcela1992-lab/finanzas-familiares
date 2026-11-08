@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useCruceCuentas, Movimiento, SoporteCruce, fraseSaldo, comoSalda } from "../../hooks/useCruceCuentas";
+import { useCruceCuentas, Movimiento, SoporteCruce, Recurrente, fraseSaldo, comoSalda } from "../../hooks/useCruceCuentas";
 import { extensionDe } from "../../hooks/useReporteJuanes";
 import { mesHoy, moverMes } from "../../hooks/useDashboard";
 import Card from "../../components/Card";
@@ -48,6 +48,8 @@ export default function CruceCuentas() {
   const [guardando, setGuardando] = useState(false);
   const [subiendo, setSubiendo] = useState<string | null>(null);
   const [armando, setArmando] = useState(false);
+  const [repetir, setRepetir] = useState(false);
+  const [editandoRec, setEditandoRec] = useState<string | null>(null);
 
   // ajustes de la cuenta
   const [ajustes, setAjustes] = useState(false);
@@ -82,10 +84,27 @@ export default function CruceCuentas() {
     setValor(preset?.valor ? Math.round(preset.valor).toLocaleString("es-CO") : "");
     setNota("");
     setArchivo(null);
+    setRepetir(false);
+    setEditandoRec(null);
     setFecha(esMesActual ? hoyISO() : `${mes}-01`);
     setAbierto(true);
   }
+  function abrirRecurrente(r: Recurrente) {
+    setEditando(null);
+    setEditandoRec(r.id);
+    setRepetir(true);
+    setClase(r.clase);
+    setQuien(r.quien);
+    setConcepto(r.concepto);
+    setValor(Math.round(r.valor).toLocaleString("es-CO"));
+    setNota("");
+    setArchivo(null);
+    setFecha(`${r.desde}-${String(r.dia).padStart(2, "0")}`);
+    setAbierto(true);
+  }
   function abrirEdicion(m: Movimiento) {
+    setEditandoRec(null);
+    setRepetir(false);
     setEditando(m.id);
     setClase(m.clase);
     setQuien(m.quien);
@@ -108,6 +127,18 @@ export default function CruceCuentas() {
     if (!(v > 0)) return Alert.alert("Falta el valor", "Escribe un valor mayor que cero (sin signo).");
     setGuardando(true);
     try {
+      if (editandoRec || (repetir && !editando)) {
+        // gasto que se repite cada mes: se crea la regla y la app anota sola cada mes
+        const id = await c.guardarRecurrente({ id: editandoRec ?? undefined, concepto, valor: v, clase, quien, dia: Number(fecha.slice(8, 10)) || 1, desde: fecha.slice(0, 7) });
+        if (archivo && id) await c.subirSoporte(id, archivo);
+        else if (archivo) Alert.alert("Soporte no subido", "Ese mes todavía no se anota; súbelo cuando aparezca el movimiento.");
+        if (!editandoRec && fecha.slice(0, 7) <= mesHoy() && fecha.slice(0, 7) !== mes) setMes(fecha.slice(0, 7));
+        setAbierto(false);
+        setEditandoRec(null);
+        setRepetir(false);
+        setArchivo(null);
+        return;
+      }
       const id = await c.guardarMov({ id: editando ?? undefined, fecha, concepto, valor: v, clase, quien, nota });
       if (archivo) await c.subirSoporte(id, archivo);
       if (fecha.slice(0, 7) !== mes) setMes(fecha.slice(0, 7));
@@ -119,6 +150,13 @@ export default function CruceCuentas() {
     } finally {
       setGuardando(false);
     }
+  }
+
+  function confirmarDetener(r: Recurrente) {
+    Alert.alert("Dejar de repetir", `«${r.concepto}» ya no se anotará más. Lo que ya está anotado en los meses anteriores se conserva.`, [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Dejar de repetir", style: "destructive", onPress: () => c.detenerRecurrente(r.id).catch((e) => Alert.alert("Error", e.message)) },
+    ]);
   }
 
   function confirmarBorrar(m: Movimiento) {
@@ -342,7 +380,7 @@ export default function CruceCuentas() {
       {abierto && (
         <Card>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <Text style={typography.h3}>{editando ? "Editar" : "Nuevo"} movimiento</Text>
+            <Text style={typography.h3}>{editandoRec ? "Editar gasto que se repite" : editando ? "Editar movimiento" : "Nuevo movimiento"}</Text>
             <TouchableOpacity onPress={() => setAbierto(false)} accessibilityLabel="Cerrar sin guardar" hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Ionicons name="close-circle" size={28} color={colors.textMuted} />
             </TouchableOpacity>
@@ -377,11 +415,22 @@ export default function CruceCuentas() {
           <Text style={styles.label}>Fecha</Text>
           <FechaInput value={fecha} onChange={setFecha} />
           <TextInput style={[styles.input, { marginTop: spacing.sm }]} placeholder="Nota (opcional)" placeholderTextColor={colors.textMuted} value={nota} onChangeText={setNota} />
-          <TouchableOpacity style={[styles.botonBorde, { marginBottom: spacing.sm }]} onPress={async () => setArchivo((await elegirArchivo()) ?? archivo)}>
+          {!editando && !editandoRec && (
+            <TouchableOpacity style={[styles.repetir, repetir && styles.repetirActivo]} onPress={() => setRepetir(!repetir)} accessibilityLabel="Repetir todos los meses">
+              <Ionicons name={repetir ? "checkbox" : "square-outline"} size={22} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.repetirTitulo}>Se repite todos los meses</Text>
+                <Text style={typography.caption}>{repetir ? `Se anotará solo cada mes, el día ${Number(fecha.slice(8, 10)) || 1}, desde ${nombreMes(fecha.slice(0, 7))}.` : "Para gastos fijos como Netflix."}</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          {editandoRec && <Text style={[typography.caption, { marginBottom: spacing.sm }]}>El cambio vale para los meses que todavía no se han anotado; los ya anotados no se tocan. El día del mes sale de la fecha.</Text>}
+          {editando && c.movs.find((m) => m.id === editando)?.recurrenteId && <Text style={[typography.caption, { marginBottom: spacing.sm }]}>Este movimiento viene de un gasto que se repite; si lo cambias, solo cambia este mes.</Text>}
+          {!editandoRec && (<TouchableOpacity style={[styles.botonBorde, { marginBottom: spacing.sm }]} onPress={async () => setArchivo((await elegirArchivo()) ?? archivo)}>
             <Ionicons name="attach" size={18} color={colors.primary} />
             <Text style={styles.botonBordeTexto} numberOfLines={1}>{archivo ? `Soporte: ${archivo.name}` : "Adjuntar PDF o foto como soporte"}</Text>
-          </TouchableOpacity>
-          <PrimaryButton title={editando ? "Guardar cambios" : "Guardar"} onPress={guardar} loading={guardando} />
+          </TouchableOpacity>)}
+          <PrimaryButton title={editando || editandoRec ? "Guardar cambios" : "Guardar"} onPress={guardar} loading={guardando} />
           <TouchableOpacity onPress={() => setAbierto(false)} style={styles.salir}>
             <Text style={{ textAlign: "center", color: colors.textPrimary, fontWeight: "600" }}>Salir sin guardar</Text>
           </TouchableOpacity>
@@ -395,7 +444,7 @@ export default function CruceCuentas() {
           <View key={m.id} style={styles.mov}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
               <TouchableOpacity style={{ flex: 1 }} onPress={() => abrirEdicion(m)} activeOpacity={0.6} accessibilityLabel={`Editar ${m.concepto}`}>
-                <Text style={styles.movTitulo}>{m.concepto}</Text>
+                <Text style={styles.movTitulo}>{m.recurrenteId ? "🔁 " : ""}{m.concepto}</Text>
                 <Text style={typography.caption}>
                   {m.fecha} · {m.clase === "pago" ? "Pago" : "Gasto"} · puso {quienPuso(m)}
                   {m.nota ? ` · ${m.nota}` : ""}
@@ -426,6 +475,24 @@ export default function CruceCuentas() {
                 <Text style={styles.soporteAgregarTexto}>{subiendo === m.id ? "Subiendo..." : "Subir PDF / foto"}</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        ))}
+      </Card>
+
+      <Card>
+        <Text style={typography.h3}>Gastos que se repiten cada mes</Text>
+        <Text style={[typography.caption, { marginBottom: 4 }]}>La app los anota sola cada mes. Para agregar uno, usa «Agregar movimiento» y marca «Se repite todos los meses».</Text>
+        {c.recurrentes.filter((r) => r.activo).length === 0 && <Text style={[typography.caption, { marginTop: 6 }]}>Todavía no hay ninguno.</Text>}
+        {c.recurrentes.filter((r) => r.activo).map((r) => (
+          <View key={r.id} style={styles.hist}>
+            <TouchableOpacity style={{ flex: 1 }} onPress={() => abrirRecurrente(r)} activeOpacity={0.6} accessibilityLabel={`Editar ${r.concepto}`}>
+              <Text style={styles.movTitulo}>🔁 {r.concepto}</Text>
+              <Text style={typography.caption}>Día {r.dia} de cada mes · puso {r.quien === "yo" ? c.miNombre : otra} · desde {nombreMes(r.desde)}</Text>
+            </TouchableOpacity>
+            <Text style={styles.movValor}>{pesos(r.valor)}</Text>
+            <TouchableOpacity onPress={() => confirmarDetener(r)} accessibilityLabel={`Dejar de repetir ${r.concepto}`} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close-circle-outline" size={20} color={colors.danger} />
+            </TouchableOpacity>
           </View>
         ))}
       </Card>
@@ -534,6 +601,9 @@ const styles = StyleSheet.create({
   soporteTexto: { fontSize: 12, color: colors.primary, flexShrink: 1 },
   soporteAgregar: { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderColor: colors.primary, borderRadius: 14, paddingHorizontal: 8, paddingVertical: 4 },
   soporteAgregarTexto: { fontSize: 12, color: colors.primary, fontWeight: "700" },
+  repetir: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md, padding: 10, marginBottom: spacing.sm },
+  repetirActivo: { borderColor: colors.primary },
+  repetirTitulo: { fontSize: 14, fontWeight: "700", color: colors.textPrimary },
   salir: { marginTop: spacing.sm, borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md, paddingVertical: 12 },
   botonBorde: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1.5, borderColor: colors.primary, borderRadius: radius.md, paddingVertical: 12 },
   botonBordeTexto: { color: colors.primary, fontWeight: "700", fontSize: 14 },

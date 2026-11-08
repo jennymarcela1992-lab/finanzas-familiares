@@ -27,6 +27,19 @@ export interface Movimiento {
   clase: "gasto" | "pago";
   quien: "yo" | "otra";
   nota: string;
+  recurrenteId: string | null;
+}
+export interface Recurrente {
+  id: string;
+  cuentaId: string;
+  concepto: string;
+  valor: number;
+  clase: "gasto" | "pago";
+  quien: "yo" | "otra";
+  dia: number;
+  desde: string;
+  activo: boolean;
+  omitidos: string[];
 }
 export interface SoporteCruce {
   id: string;
@@ -53,12 +66,14 @@ export interface EntradaMov {
 }
 
 const redondear = (n: number) => Math.round(n * 100) / 100;
+const diasDelMes = (mes: string) => new Date(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)), 0).getDate();
 
 export function useCruceCuentas(mes: string) {
   const [cuentas, setCuentas] = useState<Cuenta[]>([]);
   const [cuentaId, setCuentaId] = useState<string | null>(null);
   const [movs, setMovs] = useState<Movimiento[]>([]);
   const [soportes, setSoportes] = useState<SoporteCruce[]>([]);
+  const [recurrentes, setRecurrentes] = useState<Recurrente[]>([]);
   const [miNombre, setMiNombre] = useState("Yo");
   const [cargando, setCargando] = useState(true);
   const [faltaSql, setFaltaSql] = useState(false);
@@ -98,10 +113,33 @@ export function useCruceCuentas(mes: string) {
       setCuentas(lista);
       const elegido = lista.find((c) => c.id === (idElegido ?? cuentaId))?.id ?? lista[0].id;
       setCuentaId(elegido);
-      const [rm, rs] = await Promise.all([
-        supabase.from("cruce_movimientos").select("*").eq("usuario_id", u.id).eq("cuenta_id", elegido).order("fecha").order("creado_en"),
-        supabase.from("cruce_soportes").select("*").eq("usuario_id", u.id).order("creado_en"),
-      ]);
+      const traer = () =>
+        Promise.all([
+          supabase.from("cruce_movimientos").select("*").eq("usuario_id", u.id).eq("cuenta_id", elegido).order("fecha").order("creado_en"),
+          supabase.from("cruce_soportes").select("*").eq("usuario_id", u.id).order("creado_en"),
+          supabase.from("cruce_recurrentes").select("*").eq("usuario_id", u.id).eq("cuenta_id", elegido).order("creado_en"),
+        ]);
+      let [rm, rs, rr] = await traer();
+      let recs: Recurrente[] = rr.error
+        ? [] // si aún no se corrió la parte nueva del SQL, se sigue sin recurrentes
+        : (rr.data ?? []).map((x: any) => ({ id: x.id, cuentaId: x.cuenta_id, concepto: x.concepto, valor: Number(x.valor), clase: x.clase === "pago" ? "pago" : "gasto", quien: x.quien === "yo" ? "yo" : "otra", dia: Number(x.dia ?? 1), desde: x.desde, activo: x.activo !== false, omitidos: x.omitidos ?? [] }));
+      // anota solos los gastos que se repiten cada mes (hasta el mes actual) que todavía no existen
+      if (recs.some((r) => r.activo)) {
+        const nuevos: any[] = [];
+        const existentes = new Set((rm.data ?? []).filter((m: any) => m.recurrente_id).map((m: any) => `${m.recurrente_id}|${m.mes}`));
+        const hoy = mesHoy();
+        for (const r of recs.filter((x) => x.activo)) {
+          for (let m = r.desde, n = 0; m <= hoy && n < 120; m = moverMes(m, 1), n++) {
+            if (existentes.has(`${r.id}|${m}`) || r.omitidos.includes(m)) continue;
+            nuevos.push({ usuario_id: u.id, cuenta_id: elegido, mes: m, fecha: `${m}-${String(Math.min(r.dia, diasDelMes(m))).padStart(2, "0")}`, concepto: r.concepto, monto: redondear(r.quien === "otra" ? r.valor : -r.valor), clase: r.clase, quien: r.quien, recurrente_id: r.id });
+          }
+        }
+        if (nuevos.length) {
+          await supabase.from("cruce_movimientos").insert(nuevos); // el índice único evita duplicados si se abre dos veces a la vez
+          [rm, rs, rr] = await traer();
+        }
+      }
+      setRecurrentes(recs);
       setMovs(
         (rm.data ?? []).map((m: any) => ({
           id: m.id,
@@ -114,6 +152,7 @@ export function useCruceCuentas(mes: string) {
           clase: m.clase === "pago" ? "pago" : "gasto",
           quien: m.quien === "yo" ? "yo" : "otra",
           nota: m.nota ?? "",
+          recurrenteId: m.recurrente_id ?? null,
         }))
       );
       setSoportes((rs.data ?? []).map((x: any) => ({ id: x.id, movimientoId: x.movimiento_id, nombre: x.nombre, ruta: x.ruta, tipo: x.tipo ?? "" })));
@@ -205,9 +244,43 @@ export function useCruceCuentas(mes: string) {
   }
 
   async function borrarMov(id: string) {
+    const mov = movs.find((m) => m.id === id);
+    if (mov?.recurrenteId) {
+      // borraste un mes de un gasto recurrente a propósito: que no se vuelva a crear solo
+      const r = recurrentes.find((x) => x.id === mov.recurrenteId);
+      if (r) await supabase.from("cruce_recurrentes").update({ omitidos: [...r.omitidos, mov.mes] }).eq("id", r.id);
+    }
     const propios = soportes.filter((s) => s.movimientoId === id);
     if (propios.length) await supabase.storage.from(BUCKET).remove(propios.map((s) => s.ruta));
     const { error: err } = await supabase.from("cruce_movimientos").delete().eq("id", id);
+    if (err) throw err;
+    await cargar(cuentaId);
+  }
+
+  /** Crea (o edita) un gasto que se repite cada mes. Devuelve el id del movimiento del primer mes, si ya existe. */
+  async function guardarRecurrente(e: { id?: string; concepto: string; valor: number; clase: "gasto" | "pago"; quien: "yo" | "otra"; dia: number; desde: string }): Promise<string | null> {
+    if (!cuenta) throw new Error("No hay cuenta.");
+    const { data: sesion } = await supabase.auth.getUser();
+    const uid = sesion.user?.id;
+    if (!uid) throw new Error("Tu sesión expiró.");
+    const fila = { concepto: e.concepto.trim(), valor: e.valor, clase: e.clase, quien: e.quien, dia: Math.min(31, Math.max(1, Math.round(e.dia))), desde: e.desde };
+    let rid = e.id;
+    if (rid) {
+      const { error: err } = await supabase.from("cruce_recurrentes").update({ concepto: fila.concepto, valor: fila.valor, quien: fila.quien, clase: fila.clase, dia: fila.dia }).eq("id", rid);
+      if (err) throw err;
+    } else {
+      const { data, error: err } = await supabase.from("cruce_recurrentes").insert({ ...fila, usuario_id: uid, cuenta_id: cuenta.id }).select("id").single();
+      if (err) throw new Error(/relation|does not exist|schema cache/i.test(err.message) ? "Falta correr de nuevo supabase_cruce_cuentas.sql en Supabase (trae la parte de gastos recurrentes)." : err.message);
+      rid = (data as any).id as string;
+    }
+    await cargar(cuenta.id);
+    const { data: mov } = await supabase.from("cruce_movimientos").select("id").eq("recurrente_id", rid).eq("mes", e.desde).maybeSingle();
+    return (mov as any)?.id ?? null;
+  }
+
+  /** Deja de repetir el gasto desde ahora; lo ya anotado se conserva. */
+  async function detenerRecurrente(id: string) {
+    const { error: err } = await supabase.from("cruce_recurrentes").update({ activo: false }).eq("id", id);
     if (err) throw err;
     await cargar(cuentaId);
   }
@@ -247,7 +320,7 @@ export function useCruceCuentas(mes: string) {
     return data ? new Uint8Array(await data.arrayBuffer()) : null;
   }
 
-  return { cuentas, cuenta, miNombre, movs, movsMes, soportes, historial, filaMes, cargando, faltaSql, error, seleccionarCuenta, crearCuenta, guardarCuenta, guardarMov, borrarMov, subirSoporte, borrarSoporte, urlSoporte, bytesSoporte };
+  return { cuentas, cuenta, miNombre, movs, movsMes, soportes, recurrentes, guardarRecurrente, detenerRecurrente, historial, filaMes, cargando, faltaSql, error, seleccionarCuenta, crearCuenta, guardarCuenta, guardarMov, borrarMov, subirSoporte, borrarSoporte, urlSoporte, bytesSoporte };
 }
 
 // ---- textos del saldo (comparten pantalla, Excel y PDF) ----
